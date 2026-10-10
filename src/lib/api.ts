@@ -564,8 +564,8 @@ export function getBenchmark(): Promise<BenchmarkResult> {
 // don't use it.
 
 /** One machine's statement for last month, under payout model A, B or C. */
-export async function getInvestorStatement(machineId: string, model: "A" | "B" | "C"): Promise<InvestorStatement> {
-  return statementFromSales(machineId, await getSales(machineId, 60), model);
+export async function getInvestorStatement(machineId: string, model: "A" | "B" | "C", value?: number): Promise<InvestorStatement> {
+  return statementFromSales(machineId, await getSales(machineId, 60), model, undefined, value);
 }
 
 /** Weekly sales, costs and profit for one machine, last 8 weeks. */

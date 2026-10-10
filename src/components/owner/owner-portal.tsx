@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useState } from "react";
+import { useState } from "react";
 import {
   ArrowLeftRight,
   Check,
@@ -45,12 +45,26 @@ import { ChartSkeleton, EmptyState, ErrorState, RowsSkeleton } from "@/component
 import { ProfitWeeksChart } from "@/components/charts";
 import { LocationTag, StockBar, stockColor, stockLevel } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { VendingMachine } from "@/components/vending/vending-machine";
 import { Skeleton } from "@/components/ui/skeleton";
 
-export function OwnerPortal({ params }: { params: Promise<{ machineId: string }> }) {
-  const { machineId } = use(params);
+/** What the server tells the portal about the signed-in investor (see src/lib/auth.ts). */
+export interface PortalInvestorView {
+  name: string;
+  payoutModel: "A" | "B" | "C";
+  payoutValue: number;
+  machineIds: string[];
+}
+
+export const payoutTerms = (i: Pick<PortalInvestorView, "payoutModel" | "payoutValue">) =>
+  i.payoutModel === "A"
+    ? `fixed €${i.payoutValue} a month`
+    : `${Math.round(i.payoutValue * 100)}% of ${i.payoutModel === "B" ? "sales" : "net profit"}`;
+
+export function OwnerPortal({ machineId, investor }: { machineId: string; investor: PortalInvestorView }) {
   const router = useRouter();
-  const machines = useAsync(getMachines, "machines");
+  const allMachines = useAsync(getMachines, "machines");
+  const machines = { data: allMachines.data?.filter((x) => investor.machineIds.includes(x.id)) };
   const machine = useAsync(() => getMachine(machineId), `machine:${machineId}`);
 
   if (machine.error) return <ErrorState error={machine.error} onRetry={machine.retry} />;
@@ -60,12 +74,14 @@ export function OwnerPortal({ params }: { params: Promise<{ machineId: string }>
     <div className="mx-auto max-w-[1400px]">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-bold tracking-wider text-primary uppercase">Owner portal</p>
+          <Link href="/owner" className="text-sm font-bold tracking-wider text-primary uppercase hover:underline">
+            ← All my machines ({investor.machineIds.length})
+          </Link>
           <h1 className="mt-1 text-3xl font-bold tracking-tight lg:text-[2rem]">My machine</h1>
           <p className="mt-1.5 text-lg text-muted-foreground">How your machine is doing, what it earns, and what the agent suggests.</p>
         </div>
         <label className="flex items-center gap-2 text-base font-medium text-muted-foreground">
-          Viewing as owner of
+          Machine
           <select
             value={machineId}
             onChange={(e) => router.push(`/owner/${e.target.value}`)}
@@ -83,7 +99,8 @@ export function OwnerPortal({ params }: { params: Promise<{ machineId: string }>
       </div>
 
       {m ? <HealthBanner machine={m} /> : <Skeleton className="h-36 rounded-2xl" />}
-      <Kpis machineId={machineId} machine={m} />
+      <Kpis machineId={machineId} machine={m} investor={investor} />
+      <InsideTheMachine machineId={machineId} machine={m} />
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <ProfitPanel machineId={machineId} />
@@ -147,9 +164,12 @@ function HealthBanner({ machine: m }: { machine: Machine }) {
   );
 }
 
-function Kpis({ machineId, machine }: { machineId: string; machine?: Machine }) {
+function Kpis({ machineId, machine, investor }: { machineId: string; machine?: Machine; investor: PortalInvestorView }) {
   const profit = useAsync(() => getProfitHistory(machineId), `profit:${machineId}`);
-  const statement = useAsync(() => getInvestorStatement(machineId, "B"), `statement:${machineId}:B`);
+  const statement = useAsync(
+    () => getInvestorStatement(machineId, investor.payoutModel, investor.payoutValue),
+    `statement:${machineId}:${investor.payoutModel}:${investor.payoutValue}`,
+  );
   const last4 = profit.data?.slice(-5, -1).reduce((s, w) => s + w.profit, 0);
 
   return (
@@ -160,7 +180,7 @@ function Kpis({ machineId, machine }: { machineId: string; machine?: Machine }) 
         label="Your payout"
         value={statement.data?.payout}
         format={formatEURRound}
-        sub={statement.data ? `${formatMonth(statement.data.month)}, model B (15% of sales)` : undefined}
+        sub={statement.data ? `${formatMonth(statement.data.month)}, model ${investor.payoutModel} (${payoutTerms(investor)})` : undefined}
         link={{ href: `/investor/${machineId}`, label: "Full statement" }}
       />
       <Kpi
@@ -240,6 +260,40 @@ function ProfitPanel({ machineId }: { machineId: string }) {
         <ProfitWeeksChart data={profit.data} />
       )}
     </Panel>
+  );
+}
+
+/** The machine as it looks on site: every slot, its products and how many are left. */
+function InsideTheMachine({ machineId, machine }: { machineId: string; machine?: Machine }) {
+  const stock = useAsync(() => getStock(machineId), `stock:${machineId}`);
+  return (
+    <section className="mt-8">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Inside your machine</h2>
+          <p className="mt-1 text-base text-muted-foreground">
+            Every slot as it looks right now. Click a slot, or type its code on the keypad, to see what&apos;s left.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="rounded bg-red-600 px-1 text-[10px] font-black text-white">SOLD OUT</span> empty slot
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-3 rounded-full bg-amber-400" /> expires within 48 h
+          </span>
+        </div>
+      </div>
+      {stock.error ? (
+        <ErrorState error={stock.error} onRetry={stock.retry} />
+      ) : !stock.data || !machine ? (
+        <Skeleton className="h-[640px] rounded-[28px]" />
+      ) : stock.data.length === 0 ? (
+        <EmptyState title="No slots configured" />
+      ) : (
+        <VendingMachine slots={stock.data} name={machine.name} offline={machine.status === "offline"} />
+      )}
+    </section>
   );
 }
 

@@ -37,13 +37,16 @@ export function statementFromSales(
   sales: SalesPoint[],
   model: "A" | "B" | "C",
   month = STATEMENT_MONTH,
+  /** The investor's own terms (A: € a month, B/C: share 0–1); defaults to PAYOUT_TERMS. */
+  value?: number,
 ): InvestorStatement {
   const gross = round2(sales.filter((d) => d.date.startsWith(month)).reduce((s, d) => s + d.revenue, 0));
   const cogs = round2(gross * COGS_SHARE);
   const cardFees = round2(gross * CARD_FEES);
   const costs = round2(cogs + RENT + SERVICING + cardFees + TELEMETRY);
   const net = round2(gross - costs);
-  const payout = round2(model === "A" ? PAYOUT_TERMS.A : model === "B" ? gross * PAYOUT_TERMS.B : Math.max(0, net * PAYOUT_TERMS.C));
+  const v = value ?? PAYOUT_TERMS[model];
+  const payout = round2(model === "A" ? v : model === "B" ? gross * v : Math.max(0, net * v));
   return {
     machineId,
     month,
