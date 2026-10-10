@@ -247,6 +247,8 @@ function fromStep(s: Contract.AgentStep, i: number): AgentStep[] {
     case "decision":
       return [{ id, timestamp: s.at, type: "decision", title: s.text ?? "Decision" }];
     case "error":
+      // Viktor's runs route reports a failed tool as { type: "error", tool, output: { error } }.
+      if (s.tool && !s.text) return [resultStep(id, s.at, s.tool, s.output, true)];
       return [{ id, timestamp: s.at, type: "guardrail", title: s.text ?? "Something went wrong", detail: describe(s.output) }];
     case "tool_result":
       return [resultStep(id, s.at, s.tool, s.output, false)];
