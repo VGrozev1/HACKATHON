@@ -105,20 +105,67 @@ export const stock: Record<string, StockEntry[]> = {
 };
 
 // Average units sold per day, per product, per machine — used by forecast().
+// Three numbers here are deliberately tuned as demo signals:
+// - OFF-01's Water barely moves (would take ~50 days to sell a full
+//   20-unit slot — a classic "slow seller" tying up slot capacity).
+// - GYM-01's Energy drink sells fast enough relative to its 12-unit
+//   capacity that it reliably runs low again within a couple of days
+//   ("always sells out early"), independent of any weather/holiday effect.
+// - OFF-01's Coffee to go is a genuinely high-volume product (11/day) so
+//   check_alerts' "sudden zero" check (Step 12a) has a real >=10/day
+//   product to compare today's zero sales against.
 export const avgDailySales: Record<string, Record<string, number>> = {
   "GYM-01": {
     "Water 0.5l": 4.5,
-    "Energy drink": 3,
+    "Energy drink": 5,
     "Protein bar": 2,
   },
   "OFF-01": {
-    "Coffee to go": 6,
+    "Coffee to go": 11,
     "Sandwich": 5,
-    "Water 0.5l": 2,
+    "Water 0.5l": 0.4,
   },
   "HOS-01": {
     "Water 0.5l": 3,
     "Protein bar": 1.5,
     "Sandwich": 2,
   },
+};
+
+// ---- Step 12a: data for check_alerts (the real API has no granular-enough
+// endpoint for any of this yet — hour-of-last-sale, per-product daily
+// actuals, and cash-vs-fiscal reconciliation are all mock-only for now) ---
+
+export type OpeningHours = { open: number; close: number }; // hour of day, 0-24, local time
+
+export const openingHours: Record<string, OpeningHours> = {
+  "GYM-01": { open: 6, close: 23 },
+  "OFF-01": { open: 8, close: 19 },
+  "HOS-01": { open: 0, close: 24 }, // hospital — effectively open round the clock
+};
+
+// Hours since each machine's last recorded sale. Demo signal: GYM-01 is
+// tuned to look offline (over the 6-hour threshold); the others look fine.
+export const hoursSinceLastSale: Record<string, number> = {
+  "GYM-01": 7,
+  "OFF-01": 1,
+  "HOS-01": 2,
+};
+
+// Units sold TODAY per product per machine. Demo signal: OFF-01's Coffee
+// to go (normally ~11/day) sold zero today — a classic jammed-slot sign.
+export const todaySales: Record<string, Record<string, number>> = {
+  "GYM-01": { "Water 0.5l": 5, "Energy drink": 4, "Protein bar": 2 },
+  "OFF-01": { "Coffee to go": 0, "Sandwich": 4, "Water 0.5l": 0 },
+  "HOS-01": { "Water 0.5l": 3, "Protein bar": 1, "Sandwich": 2 },
+};
+
+export type CashReport = { cashCollected: number; fiscalReportTotal: number };
+
+// Demo signal: OFF-01 is off by more than the €2 tolerance; the others
+// are exact or within tolerance.
+export const cashReports: Record<string, CashReport> = {
+  "GYM-01": { cashCollected: 42.5, fiscalReportTotal: 42.5 },
+  "OFF-01": { cashCollected: 58.3, fiscalReportTotal: 55.1 },
+  "HOS-01": { cashCollected: 30.0, fiscalReportTotal: 29.4 },
 };

@@ -3,7 +3,15 @@ import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { tools, runTool, purchaseOrders, type PurchaseOrder } from "./tools.ts";
+import {
+  tools,
+  runTool,
+  purchaseOrders,
+  suggestions,
+  type PurchaseOrder,
+  type Suggestion,
+} from "./tools.ts";
+import { getYesterdaysMisses, formatMisses } from "./misses.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const systemPrompt = readFileSync(path.join(here, "prompt.md"), "utf-8");
@@ -20,6 +28,7 @@ export type RunResult = {
   date: string;
   summary: string;
   orders: PurchaseOrder[];
+  suggestions: Suggestion[];
   steps: ToolStep[];
 };
 
@@ -31,13 +40,18 @@ export async function runNight(
 ): Promise<RunResult> {
   const client = new Anthropic();
 
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: `Run the nightly restocking routine for ${date}.` },
-  ];
+  const misses = await getYesterdaysMisses(new Date());
+  const missesText = formatMisses(misses);
+  const firstMessage = missesText
+    ? `Run the nightly restocking routine for ${date}.\n\n${missesText}`
+    : `Run the nightly restocking routine for ${date}.`;
+
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content: firstMessage }];
 
   const steps: ToolStep[] = [];
   let toolCallCount = 0;
   const ordersStartIndex = purchaseOrders.length;
+  const suggestionsStartIndex = suggestions.length;
 
   let summary = "";
   let step = 0;
@@ -109,7 +123,8 @@ export async function runNight(
   }
 
   const orders = purchaseOrders.slice(ordersStartIndex);
-  const run: RunResult = { date, summary, orders, steps };
+  const suggestionsThisRun = suggestions.slice(suggestionsStartIndex);
+  const run: RunResult = { date, summary, orders, suggestions: suggestionsThisRun, steps };
 
   await saveRun(run);
 
