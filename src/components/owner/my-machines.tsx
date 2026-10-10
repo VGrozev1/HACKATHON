@@ -10,7 +10,8 @@ import { useAsync } from "@/hooks/use-async";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, GridSkeleton } from "@/components/states";
 import { LocationTag, OfflineBadge, StockBar, stockColor, stockLevel } from "@/components/status";
-import { payoutTerms, type PortalInvestorView } from "@/components/owner/owner-portal";
+import type { PortalInvestorView } from "@/components/owner/owner-portal";
+import { payoutTerms } from "@/lib/insights";
 
 export function MyMachines({ investor }: { investor: PortalInvestorView }) {
   const { data, error, loading, retry } = useAsync(getMachines, "machines");

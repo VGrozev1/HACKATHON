@@ -16,7 +16,7 @@ const STEPS = [
   { href: "/orders", label: "Orders", hint: "Approve the €412 Balkan Snack Distribution order" },
   { href: "/simulation", label: "Simulation", hint: "Fast-forward a week: the one number" },
   { href: "/investor/SOF-GYM-01", label: "Investor view", hint: "Statement and payout A / B / C" },
-  { href: "/owner", label: "Investor portal (optional)", hint: "Sign in as an investor (docs/DEMO-ACCOUNTS.md)" },
+  { href: "/owner", label: "Investor portal (optional)", hint: "Sign out, then sign in as an investor (docs/DEMO-ACCOUNTS.md)" },
 ];
 
 function isTypingTarget(el: EventTarget | null) {
@@ -31,6 +31,8 @@ export function DemoScript() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
+      // Never jump away from an open confirmation dialog or side sheet.
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
       const n = Number(e.key);
       if (Number.isInteger(n) && n >= 1 && n <= STEPS.length) {
         e.preventDefault();

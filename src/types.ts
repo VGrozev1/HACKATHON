@@ -55,7 +55,7 @@ export interface ForecastPoint {
   actual: number | null;
 }
 
-export type OrderStatus = "sent_automatically" | "waiting_for_approval" | "approved" | "rejected";
+export type OrderStatus = "draft" | "sent_automatically" | "waiting_for_approval" | "approved" | "rejected";
 
 export interface PurchaseOrder {
   id: string;
@@ -113,6 +113,8 @@ export interface StrategyTotals {
 }
 
 export interface BenchmarkResult {
+  /** True when this is the built-in demo result shown while the API is down: never a real run. */
+  isBackup?: boolean;
   days: number;
   agent: StrategyTotals;
   fixedOrder: StrategyTotals;

@@ -7,7 +7,8 @@ import { use } from "react";
 import { ArrowLeft, Lightbulb, TriangleAlert } from "lucide-react";
 import type { Slot } from "@/types";
 import { getForecast, getMachine, getSales, getStock } from "@/lib/api";
-import { DEMO_NOW, dayKey, formatDate, formatEUR } from "@/lib/format";
+import { dayKey, formatDate, formatEUR, hoursUntil } from "@/lib/format";
+import { useSimNow } from "@/hooks/use-sim-now";
 import { useAsync } from "@/hooks/use-async";
 import { cn } from "@/lib/utils";
 import { PageHeader, Panel } from "@/components/page-header";
@@ -18,6 +19,7 @@ import { LocationTag, OfflineBadge, StockBar, stockColor, stockLevel } from "@/c
 
 export function MachineDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const now = useSimNow();
   const machine = useAsync(() => getMachine(id), `machine:${id}`);
   const sales = useAsync(() => getSales(id, 60), `sales:${id}`);
   const stock = useAsync(() => getStock(id), `stock:${id}`);
@@ -143,7 +145,7 @@ export function MachineDetail({ params }: { params: Promise<{ id: string }> }) {
           ) : forecast.data.length === 0 ? (
             <EmptyState title="No forecast yet" description="The agent forecasts each machine during its nightly run." />
           ) : (
-            <ForecastChart data={forecast.data} today={dayKey(DEMO_NOW)} height={380} />
+            <ForecastChart data={forecast.data} today={dayKey(now)} height={380} />
           )}
         </Panel>
       </div>
@@ -173,9 +175,9 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function expiryText(iso: string): { text: string; urgent: boolean } {
+function expiryText(iso: string, now: Date): { text: string; urgent: boolean } {
   if (!iso) return { text: "–", urgent: false };
-  const hours = (new Date(iso).getTime() - DEMO_NOW.getTime()) / 3_600_000;
+  const hours = hoursUntil(iso, now);
   if (hours < 0) return { text: "Expired", urgent: true };
   if (hours < 24) return { text: `in ${Math.round(hours)} h`, urgent: true };
   const days = Math.floor(hours / 24);
@@ -183,6 +185,7 @@ function expiryText(iso: string): { text: string; urgent: boolean } {
 }
 
 function StockTable({ slots }: { slots: Slot[] }) {
+  const now = useSimNow();
   return (
     <div className="-mx-2 overflow-x-auto">
       <table className="w-full min-w-[520px] text-base">
@@ -197,7 +200,7 @@ function StockTable({ slots }: { slots: Slot[] }) {
         <tbody>
           {slots.map((s) => {
             const pct = Math.round((s.quantity / s.capacity) * 100);
-            const exp = expiryText(s.expiryDate);
+            const exp = expiryText(s.expiryDate, now);
             const urgent = exp.urgent && s.quantity > 0;
             return (
               <tr key={s.id} className={cn("border-b last:border-0", urgent && "bg-crit-soft")}>

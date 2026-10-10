@@ -46,6 +46,7 @@ import { ProfitWeeksChart } from "@/components/charts";
 import { LocationTag, StockBar, stockColor, stockLevel } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { VendingMachine } from "@/components/vending/vending-machine";
+import { payoutTerms } from "@/lib/insights";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /** What the server tells the portal about the signed-in investor (see src/lib/auth.ts). */
@@ -56,10 +57,6 @@ export interface PortalInvestorView {
   machineIds: string[];
 }
 
-export const payoutTerms = (i: Pick<PortalInvestorView, "payoutModel" | "payoutValue">) =>
-  i.payoutModel === "A"
-    ? `fixed €${i.payoutValue} a month`
-    : `${Math.round(i.payoutValue * 100)}% of ${i.payoutModel === "B" ? "sales" : "net profit"}`;
 
 export function OwnerPortal({ machineId, investor }: { machineId: string; investor: PortalInvestorView }) {
   const router = useRouter();
@@ -181,7 +178,7 @@ function Kpis({ machineId, machine, investor }: { machineId: string; machine?: M
         value={statement.data?.payout}
         format={formatEURRound}
         sub={statement.data ? `${formatMonth(statement.data.month)}, model ${investor.payoutModel} (${payoutTerms(investor)})` : undefined}
-        link={{ href: `/investor/${machineId}`, label: "Full statement" }}
+        link={{ href: `/owner/${machineId}/statement`, label: "Full statement" }}
       />
       <Kpi
         icon={<ShoppingBag />}

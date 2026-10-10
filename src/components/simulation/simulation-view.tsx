@@ -6,8 +6,9 @@
 import { useEffect, useRef, useState } from "react";
 import { CalendarDays, FastForward, RotateCcw, TrendingDown } from "lucide-react";
 import type { BenchmarkResult } from "@/types";
-import { fastForward, USE_MOCK } from "@/lib/api";
-import { addDays, DEMO_NOW, dayKey, formatDate, formatEURRound } from "@/lib/format";
+import { fastForward, getSimToday, USE_MOCK } from "@/lib/api";
+import { addDays, dayKey, formatDate, formatEURRound, setSimToday } from "@/lib/format";
+import { useSimNow } from "@/hooks/use-sim-now";
 import { useCountUp } from "@/hooks/use-count-up";
 import { cn } from "@/lib/utils";
 import { PageHeader, Panel } from "@/components/page-header";
@@ -25,6 +26,7 @@ const compareText = (pct: number, less: string, more: string) =>
   pct > 0 ? `${pct}% ${less}` : pct < 0 ? `${-pct}% ${more}` : "the same";
 
 export function SimulationView() {
+  const now = useSimNow();
   const [phase, setPhase] = useState<Phase>("idle");
   const [day, setDay] = useState(0);
   const [result, setResult] = useState<BenchmarkResult | null>(null);
@@ -51,6 +53,8 @@ export function SimulationView() {
         setDay(DAYS);
         setResult(r);
         setPhase("done");
+        // The backend's today moved on; every screen's date follows.
+        getSimToday().then(setSimToday, () => {});
       },
       (e: unknown) => {
         if (token.current !== my) return;
@@ -60,7 +64,7 @@ export function SimulationView() {
     );
   };
 
-  const firstDay = addDays(dayKey(DEMO_NOW), 1);
+  const firstDay = addDays(dayKey(now), 1);
   const currentDay = addDays(firstDay, Math.max(0, day - 1));
 
   return (
@@ -144,6 +148,12 @@ function Results({ result }: { result: BenchmarkResult }) {
 
   return (
     <div className="animate-step-in space-y-6">
+      {result.isBackup && (
+        <div role="alert" className="rounded-2xl border-2 border-warn bg-warn-soft px-6 py-4 text-lg text-warn-strong">
+          <b>Backup data, not a real simulation result.</b> The API isn&apos;t answering, so these are the built-in demo
+          numbers. Don&apos;t quote them; run it again once the API is back.
+        </div>
+      )}
       <section className="relative overflow-hidden rounded-2xl bg-sidebar p-10 text-white shadow-lg">
         <div className="absolute -top-24 -right-24 size-80 rounded-full bg-sidebar-primary/20 blur-3xl" aria-hidden />
         <div className="relative flex flex-wrap items-end justify-between gap-8">

@@ -67,6 +67,7 @@ export function LocationTag({ type, className }: { type: LocationType; className
 const pill = "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-sm font-semibold whitespace-nowrap";
 
 export const orderStatusMeta: Record<OrderStatus, { label: string; className: string }> = {
+  draft: { label: "Draft", className: "bg-muted text-muted-foreground ring-1 ring-border" },
   sent_automatically: { label: "Sent automatically", className: "bg-info-soft text-info" },
   waiting_for_approval: { label: "Waiting for approval", className: "bg-warn-soft text-warn-strong ring-1 ring-warn/40" },
   approved: { label: "Approved", className: "bg-ok-soft text-ok" },
@@ -120,7 +121,8 @@ export function RejectionReasons({ reasons, className }: { reasons?: string[]; c
 /** Awaiting approval first, rejected last, otherwise newest first. */
 export const orderStatusRank: Record<OrderStatus, number> = {
   waiting_for_approval: 0,
-  sent_automatically: 1,
-  approved: 2,
-  rejected: 3,
+  draft: 1,
+  sent_automatically: 2,
+  approved: 3,
+  rejected: 4,
 };

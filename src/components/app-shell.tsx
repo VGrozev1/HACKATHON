@@ -15,10 +15,11 @@ import {
   MoonStar,
   PanelLeftClose,
   PanelLeftOpen,
-  Store,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { DEMO_NOW, formatDate } from "@/lib/format";
+import { formatDate } from "@/lib/format";
+import { useSimNow } from "@/hooks/use-sim-now";
+import { SimClock } from "@/components/sim-clock";
 import { isUsingBackup, subscribeBackup, USE_MOCK } from "@/lib/api";
 import { DemoScript } from "@/components/demo-script";
 
@@ -28,7 +29,6 @@ const NAV = [
   { href: "/orders", label: "Orders", icon: ClipboardList, match: (p: string) => p.startsWith("/orders") },
   { href: "/simulation", label: "Simulation", icon: FastForward, match: (p: string) => p.startsWith("/simulation") },
   { href: "/investor/SOF-GYM-01", label: "Investor", icon: Landmark, match: (p: string) => p.startsWith("/investor") },
-  { href: "/owner", label: "Investor portal", icon: Store, match: (p: string) => p.startsWith("/owner") },
 ];
 
 function ActiveNav({ collapsed }: { collapsed: boolean }) {
@@ -63,8 +63,10 @@ function NavLinks({ collapsed, pathname }: { collapsed: boolean; pathname: strin
   );
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+/** `account`: the signed-in operator and Sign out, rendered on the server by the layout. */
+export function AppShell({ children, account }: { children: ReactNode; account?: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  const now = useSimNow();
 
   return (
     <div className="flex min-h-screen">
@@ -116,12 +118,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           <BackupBadge />
           <span className="inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-sm font-semibold">
             <CalendarDays className="size-4 text-muted-foreground" aria-hidden />
-            {formatDate(DEMO_NOW)}
+            {formatDate(now)}
           </span>
+          {account}
         </header>
         <main className="mx-auto w-full max-w-[1680px] flex-1 px-8 py-8">{children}</main>
       </div>
       <DemoScript />
+      <SimClock />
     </div>
   );
 }

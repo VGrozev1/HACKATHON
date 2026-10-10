@@ -129,14 +129,28 @@ function fromMachineSummary(m: Contract.MachineSummary): Machine {
   };
 }
 
-const orderStatus: Record<Contract.OrderStatus, OrderStatus> = {
-  DRAFT: "waiting_for_approval",
-  AWAITING_APPROVAL: "waiting_for_approval",
-  APPROVED: "approved",
-  SENT: "sent_automatically",
-  DELIVERED: "sent_automatically",
-  REJECTED: "rejected",
-};
+/** Orders above this needed a human's approval (AUTO_APPROVE_LIMIT_EUR, guardrail B5). */
+const AUTO_APPROVE_LIMIT_EUR = 300;
+
+/**
+ * SENT and DELIVERED only say the email went out; whether a person approved it first
+ * follows from the guardrail: over the limit means it waited for approval.
+ */
+function orderStatus(o: Contract.PurchaseOrder): OrderStatus {
+  switch (o.status) {
+    case "DRAFT":
+      return "draft";
+    case "AWAITING_APPROVAL":
+      return "waiting_for_approval";
+    case "APPROVED":
+      return "approved";
+    case "REJECTED":
+      return "rejected";
+    case "SENT":
+    case "DELIVERED":
+      return o.total > AUTO_APPROVE_LIMIT_EUR ? "approved" : "sent_automatically";
+  }
+}
 
 function fromOrder(o: Contract.PurchaseOrder): PurchaseOrder {
   return {
@@ -145,7 +159,7 @@ function fromOrder(o: Contract.PurchaseOrder): PurchaseOrder {
     createdAt: o.createdAt,
     deliveryDate: o.deliveryDate,
     total: o.total,
-    status: orderStatus[o.status],
+    status: orderStatus(o),
     lines: o.lines.map((l) => ({ product: l.productName, quantity: l.quantity, unitCost: l.unitCost })),
     machineIds: o.machineIds,
     explanation: o.explanation,
@@ -286,6 +300,15 @@ class NoBackupError extends Error {
   }
 }
 
+/**
+ * Writes go to wherever the screen's data came from: the backup store while backup data
+ * is showing, the real API otherwise. A real write is never retried against the mocks,
+ * so the user sees the server's actual error (e.g. "already approved").
+ */
+async function write<T>(real: () => Promise<T>, local: () => Promise<T>): Promise<T> {
+  return USE_MOCK || usingBackup ? local() : real();
+}
+
 /** After a failure, use backup data for a while instead of waiting on a dead API every call. */
 const COOLDOWN_MS = 30_000;
 let backupUntil = 0;
@@ -406,8 +429,7 @@ export function getOrders(): Promise<PurchaseOrder[]> {
 
 /** POST /api/orders/:id/approve */
 export function approveOrder(id: string): Promise<PurchaseOrder> {
-  return withBackup(
-    "approveOrder",
+  return write(
     async () =>
       fromOrder(await http<Contract.PurchaseOrder>(`/api/orders/${encodeURIComponent(id)}/approve`, { method: "POST" })),
     async () => {
@@ -529,31 +551,39 @@ function fromBenchmark(b: Contract.Benchmark): BenchmarkResult {
  * agent against a fixed weekly order on the same simulated demand. Falls back to the
  * benchmark in the fast-forward response if the second call fails.
  */
-export function fastForward(days = 7): Promise<BenchmarkResult> {
-  return withBackup(
-    "fastForward",
-    async () => {
-      // ~2–4 s per simulated day (api.md), so this call gets a long timeout.
-      const res = await http<Contract.FastForwardResponse>(`/api/sim/fast-forward?days=${days}`, { method: "POST" }, 90_000);
-      const b = await http<Contract.Benchmark>("/api/benchmark").catch(() => res.benchmark);
-      return fromBenchmark(b);
-    },
-    async () => {
-      await sleep(4000);
-      return benchmarkResult;
-    },
-  );
+// The benchmark is the number we tell the judges, so it is never passed off as real:
+// - API answering: the real result, or the real error (with Retry) if the run fails.
+// - API already down (backup data showing): the demo result, flagged isBackup so the
+//   screen labels it loudly as not a real simulation.
+
+export async function fastForward(days = 7): Promise<BenchmarkResult> {
+  if (USE_MOCK || usingBackup) {
+    await sleep(4000);
+    return { ...benchmarkResult, isBackup: !USE_MOCK };
+  }
+  // ~2–4 s per simulated day (api.md), so this call gets a long timeout.
+  const res = await http<Contract.FastForwardResponse>(`/api/sim/fast-forward?days=${days}`, { method: "POST" }, 90_000);
+  const b = await http<Contract.Benchmark>("/api/benchmark").catch(() => res.benchmark);
+  return fromBenchmark(b);
 }
 
 /** GET /api/benchmark: the last fast-forward's result, or a dry run of the next 7 days. */
-export function getBenchmark(): Promise<BenchmarkResult> {
+export async function getBenchmark(): Promise<BenchmarkResult> {
+  if (USE_MOCK || usingBackup) {
+    await latency();
+    return { ...benchmarkResult, isBackup: !USE_MOCK };
+  }
+  return fromBenchmark(await http<Contract.Benchmark>("/api/benchmark"));
+}
+
+// ─── Simulated today ─────────────────────────────────────────────────────────
+
+/** GET /api/today: the backend's simulated day, which fast-forward moves on. */
+export function getSimToday(): Promise<string> {
   return withBackup(
-    "getBenchmark",
-    async () => fromBenchmark(await http<Contract.Benchmark>("/api/benchmark")),
-    async () => {
-      await latency();
-      return benchmarkResult;
-    },
+    "getSimToday",
+    async () => (await http<{ today: string }>("/api/today")).today,
+    async () => dayKey(DEMO_NOW),
   );
 }
 
@@ -624,7 +654,7 @@ async function decideSuggestion(id: string, decision: "accept" | "reject"): Prom
     return updated;
   };
   if (!AGENT_LIVE) return local();
-  return withBackup("decideSuggestion", () => http<Suggestion>(`/api/suggestions/${encodeURIComponent(id)}/${decision}`, { method: "POST" }), local);
+  return write(() => http<Suggestion>(`/api/suggestions/${encodeURIComponent(id)}/${decision}`, { method: "POST" }), local);
 }
 
 /** Accepting only records the decision: it never changes prices, stock or orders. */

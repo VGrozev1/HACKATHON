@@ -7,7 +7,8 @@
 import { useState } from "react";
 import { Clock, WifiOff } from "lucide-react";
 import type { Slot } from "@/types";
-import { DEMO_NOW, formatDate, formatEUR } from "@/lib/format";
+import { formatDate, formatEUR, hoursUntil } from "@/lib/format";
+import { useSimNow } from "@/hooks/use-sim-now";
 import { cn } from "@/lib/utils";
 import { stockColor, stockLevel } from "@/components/status";
 
@@ -101,12 +102,11 @@ function Glyph({ kind, color, className }: { kind: Kind; color: string; classNam
 const codeOf = (slot: Slot) => slot.id.split("-").pop() ?? slot.id;
 const monthYear = new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "Europe/Sofia" });
 /** "best before Sat 12 Oct" when close, "best before Sept 2027" when far. */
-function bestBefore(slot: Slot): string | null {
+function bestBefore(slot: Slot, now: Date): string | null {
   if (!slot.expiryDate || slot.quantity === 0) return null;
-  const days = hoursLeft(slot) / 24;
+  const days = hoursUntil(slot.expiryDate, now) / 24;
   return `best before ${days <= 60 ? formatDate(slot.expiryDate) : monthYear.format(new Date(slot.expiryDate))}`;
 }
-const hoursLeft = (slot: Slot) => (slot.expiryDate ? (new Date(slot.expiryDate).getTime() - DEMO_NOW.getTime()) / 3_600_000 : Infinity);
 
 export function VendingMachine({
   slots,
@@ -119,6 +119,7 @@ export function VendingMachine({
   offline?: boolean;
   className?: string;
 }) {
+  const now = useSimNow();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
   const selected = slots.find((s) => s.id === selectedId) ?? null;
@@ -148,7 +149,7 @@ export function VendingMachine({
     ? [
         `${codeOf(selected)} · ${selected.product.name}`,
         selected.quantity === 0 ? "SOLD OUT" : `${selected.quantity} of ${selected.capacity} left`,
-        [selected.product.price > 0 ? formatEUR(selected.product.price) : null, bestBefore(selected)]
+        [selected.product.price > 0 ? formatEUR(selected.product.price) : null, bestBefore(selected, now)]
           .filter(Boolean)
           .join(" · "),
       ]
@@ -268,11 +269,12 @@ function Key({ label, onPress, wide }: { label: string; onPress?: () => void; wi
 }
 
 function SlotCell({ slot, selected, onSelect }: { slot: Slot; selected: boolean; onSelect: () => void }) {
+  const now = useSimNow();
   const kind = kindOf(slot);
   const color = colorOf(slot);
   const pct = slot.capacity ? Math.round((slot.quantity / slot.capacity) * 100) : 0;
   const level = stockLevel(pct);
-  const expiring = slot.quantity > 0 && hoursLeft(slot) <= 48;
+  const expiring = slot.quantity > 0 && hoursUntil(slot.expiryDate, now) <= 48;
   // Draw up to 6 items at the front; the number tells the rest.
   const drawn = Math.min(slot.quantity, 6);
   const glyphSize = { bottle: "h-10 w-4", can: "h-8 w-4", bar: "h-4 w-9", bag: "h-7 w-6", fresh: "h-5 w-7" }[kind];

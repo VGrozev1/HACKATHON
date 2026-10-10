@@ -36,13 +36,20 @@ export function useAsync<T>(load: () => Promise<T>, key: string) {
   const current = result.key === requestKey ? result : null;
   const data = override?.key === requestKey ? override.data : current?.data;
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
-  const mutate = useCallback(
-    (update: (prev: T) => T) => {
-      if (data === undefined) return;
-      setOverride({ key: requestKey, data: update(data) });
-    },
-    [data, requestKey],
-  );
+
+  // mutate() applies `update` to the latest data, not to what the caller saw when it
+  // rendered, so an optimistic rollback after an await can't undo other edits.
+  const latest = useRef({ key: requestKey, data });
+  useLayoutEffect(() => {
+    latest.current = { key: requestKey, data: current?.data };
+  });
+  const mutate = useCallback((update: (prev: T) => T) => {
+    setOverride((prev) => {
+      const { key, data: loaded } = latest.current;
+      const base = prev?.key === key ? prev.data : loaded;
+      return base === undefined ? prev : { key, data: update(base) };
+    });
+  }, []);
 
   return {
     data,

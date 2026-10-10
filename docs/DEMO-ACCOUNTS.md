@@ -1,6 +1,14 @@
-# Demo investor accounts
+# Demo accounts
 
-Logins for the investor portal at `/owner` (sign in at `/login`). Demo only: they exist so judges can see one investor with several machines. Don't reuse these passwords anywhere else.
+Logins for VendAI (sign in at `/login`). Demo only: they exist so judges can see the operator dashboard and one investor with several machines. Don't reuse these passwords anywhere else.
+
+## Operator (the dashboard: Fleet, Run night, Orders, Simulation, Investor)
+
+| Account | Username | Password | Access | |
+| --- | --- | --- | --- | --- |
+| VendAI Operations | `operator` | `delta-meadow-7466` | everything except the investor portal | |
+
+## Investors (the investor portal at /owner)
 
 | Investor | Username | Password | Machines | Machine ids |
 | --- | --- | --- | --- | --- |

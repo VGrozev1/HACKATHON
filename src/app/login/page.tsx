@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Suspense } from "react";
 import { Landmark } from "lucide-react";
 import { LoginForm } from "./login-form";
 import { Skeleton } from "@/components/ui/skeleton";
 
-export const metadata: Metadata = { title: "Sign in · VendAI investor portal" };
+export const metadata: Metadata = { title: "Sign in · VendAI" };
 
 export default function LoginPage() {
   return (
@@ -16,9 +15,9 @@ export default function LoginPage() {
             <Landmark className="size-7" />
           </span>
           <h1 className="text-3xl font-bold tracking-tight">
-            Vend<span className="text-primary">AI</span> investor portal
+            Sign in to Vend<span className="text-primary">AI</span>
           </h1>
-          <p className="mt-2 text-lg text-muted-foreground">See your machines, what&apos;s inside them, and what they earn.</p>
+          <p className="mt-2 text-lg text-muted-foreground">Investors see their own machines; operators run the fleet.</p>
         </div>
         <div className="rounded-2xl border bg-card p-7 shadow-sm">
           {/* The form reads ?next= from the URL, so it renders at request time. */}
@@ -27,10 +26,7 @@ export default function LoginPage() {
           </Suspense>
         </div>
         <p className="mt-6 text-center text-sm text-muted-foreground">
-          Demo accounts are listed in <code>docs/DEMO-ACCOUNTS.md</code>. Operator?{" "}
-          <Link href="/" className="font-semibold text-primary hover:underline">
-            Open the operator dashboard
-          </Link>
+          Demo accounts are listed in <code>docs/DEMO-ACCOUNTS.md</code>.
         </p>
       </div>
     </main>

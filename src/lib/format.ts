@@ -3,8 +3,34 @@
 
 const TZ = "Europe/Sofia";
 
-/** The simulated "now" the demo runs at: Saturday evening, just before the nightly run. */
+/** The mock data's "now": Saturday evening, just before the nightly run. */
 export const DEMO_NOW = new Date("2026-10-10T17:15:00Z");
+
+// ─── Simulated "now" ─────────────────────────────────────────────────────────
+// The backend's today moves with fast-forward (GET /api/today), so screens read the
+// simulated now from here instead of a constant. Starts at DEMO_NOW (mock mode keeps it);
+// SimClock in the app shell sets the real day, always at the same evening hour.
+
+let simNow = DEMO_NOW;
+const simListeners = new Set<() => void>();
+
+export const getSimNow = () => simNow;
+
+export function subscribeSimNow(listener: () => void) {
+  simListeners.add(listener);
+  return () => {
+    simListeners.delete(listener);
+  };
+}
+
+/** Moves the simulated now to `day` ("YYYY-MM-DD") at the demo's evening hour. */
+export function setSimToday(day: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+  const next = new Date(`${day}T17:15:00Z`);
+  if (next.getTime() === simNow.getTime()) return;
+  simNow = next;
+  simListeners.forEach((l) => l());
+}
 
 const eur = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" });
 const eurRound = new Intl.NumberFormat("en-IE", {
@@ -68,7 +94,7 @@ export function addDays(day: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Whole days from DEMO_NOW until the given date (negative if in the past). */
-export function daysUntil(d: string): number {
-  return Math.floor((toDate(d).getTime() - DEMO_NOW.getTime()) / 86_400_000);
+/** Hours from the simulated now until an ISO date (negative if past; Infinity if unknown). */
+export function hoursUntil(iso: string | null | undefined, now: Date = simNow): number {
+  return iso ? (new Date(iso).getTime() - now.getTime()) / 3_600_000 : Infinity;
 }

@@ -1,13 +1,15 @@
-// Investor login for the portal (/owner). Demo-grade but done properly on the server:
-// salted scrypt password hashes, a session cookie signed with HMAC-SHA256, httpOnly and
-// sameSite=lax. Server code only (server components, server actions): it reads cookies
-// and node:crypto, and must never be imported into a client component.
+// Sign-in for VendAI: investors (the portal at /owner) and operators (the dashboard).
+// Demo-grade but done properly on the server: salted scrypt password hashes, a session
+// cookie signed with HMAC-SHA256, httpOnly and sameSite=lax. Server code only (server
+// components, server actions): it reads cookies and node:crypto, and must never be
+// imported into a client component.
 
 import { createHmac, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { investorAccounts, type InvestorAccount } from "@/mocks/investors";
+import { operatorAccounts } from "@/mocks/operators";
 
 export const SESSION_COOKIE = "vendai_investor";
 export const SESSION_HOURS = 8;
@@ -22,6 +24,14 @@ export interface PortalInvestor {
   machineIds: string[];
 }
 
+export interface Operator {
+  id: string;
+  name: string;
+  username: string;
+}
+
+export type SessionUser = { role: "investor"; investor: PortalInvestor } | { role: "operator"; operator: Operator };
+
 const toPortal = ({ id, name, username, payoutModel, payoutValue, machineIds }: InvestorAccount): PortalInvestor => ({
   id,
   name,
@@ -30,6 +40,15 @@ const toPortal = ({ id, name, username, payoutModel, payoutValue, machineIds }: 
   payoutValue,
   machineIds,
 });
+
+/** The user for an account id, from either list; never exposes the password hash. */
+function userById(id: string | undefined): SessionUser | null {
+  const investor = investorAccounts.find((a) => a.id === id);
+  if (investor) return { role: "investor", investor: toPortal(investor) };
+  const op = operatorAccounts.find((a) => a.id === id);
+  if (op) return { role: "operator", operator: { id: op.id, name: op.name, username: op.username } };
+  return null;
+}
 
 /**
  * The key that signs sessions. AUTH_SECRET when set. Otherwise it's derived from
@@ -58,24 +77,25 @@ function passwordMatches(password: string, stored: string): boolean {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-/** The account for these credentials, or null. */
-export function checkCredentials(username: string, password: string): PortalInvestor | null {
-  const account = investorAccounts.find((a) => a.username === username.trim().toLowerCase());
+/** The account for these credentials (investor or operator), or null. */
+export function checkCredentials(username: string, password: string): SessionUser | null {
+  const name = username.trim().toLowerCase();
+  const account = [...investorAccounts, ...operatorAccounts].find((a) => a.username === name);
   const ok = passwordMatches(password, account?.passwordHash ?? DUMMY_HASH);
-  return account && ok ? toPortal(account) : null;
+  return account && ok ? userById(account.id) : null;
 }
 
 const sign = (payload: string, key: string) => createHmac("sha256", key).update(payload).digest("base64url");
 
-/** "<investorId>.<expires epoch ms>.<signature>" */
-export function createSessionToken(investorId: string): string {
+/** "<account id>.<expires epoch ms>.<signature>" */
+export function createSessionToken(accountId: string): string {
   const key = secret();
   if (!key) throw new Error("AUTH_SECRET is not set");
-  const payload = `${investorId}.${Date.now() + SESSION_HOURS * 3_600_000}`;
+  const payload = `${accountId}.${Date.now() + SESSION_HOURS * 3_600_000}`;
   return `${payload}.${sign(payload, key)}`;
 }
 
-function investorFromToken(token: string | undefined): PortalInvestor | null {
+function userFromToken(token: string | undefined): SessionUser | null {
   const key = secret();
   if (!token || !key) return null;
   const lastDot = token.lastIndexOf(".");
@@ -83,18 +103,27 @@ function investorFromToken(token: string | undefined): PortalInvestor | null {
   const given = Buffer.from(token.slice(lastDot + 1));
   const expected = Buffer.from(sign(payload, key));
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
-  const [investorId, expires] = payload.split(".");
+  const [accountId, expires] = payload.split(".");
   if (!expires || Number(expires) < Date.now()) return null;
-  const account = investorAccounts.find((a) => a.id === investorId);
-  return account ? toPortal(account) : null;
+  return userById(accountId);
 }
 
-/** The signed-in investor, or null. Reads the request cookie: call it behind a <Suspense>. */
-export async function getCurrentInvestor(): Promise<PortalInvestor | null> {
+/** The signed-in user, or null. Reads the request cookie: call it behind a <Suspense>. */
+export async function getCurrentUser(): Promise<SessionUser | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   // The expiry check reads the clock, so it must run at request time, never in a prerender.
   await connection();
-  return investorFromToken(token);
+  return userFromToken(token);
+}
+
+export async function getCurrentInvestor(): Promise<PortalInvestor | null> {
+  const user = await getCurrentUser();
+  return user?.role === "investor" ? user.investor : null;
+}
+
+export async function getCurrentOperator(): Promise<Operator | null> {
+  const user = await getCurrentUser();
+  return user?.role === "operator" ? user.operator : null;
 }
 
 /** The signed-in investor, or a redirect to the login page that comes back to `next`. */
@@ -104,7 +133,20 @@ export async function requireInvestor(next: string): Promise<PortalInvestor> {
   return investor;
 }
 
-/** Only portal paths are allowed as a post-login destination (no open redirects). */
-export function safeNext(next: unknown): string {
-  return typeof next === "string" && /^\/owner(\/[A-Za-z0-9-]*)?$/.test(next) ? next : "/owner";
+/** The signed-in operator. Investors go to their portal; everyone else to the login page. */
+export async function requireOperator(next: string): Promise<Operator> {
+  const user = await getCurrentUser();
+  if (user?.role === "operator") return user.operator;
+  if (user?.role === "investor") redirect("/owner");
+  redirect(`/login?next=${encodeURIComponent(next)}`);
+}
+
+/**
+ * Where to go after signing in, never off-site (no open redirects): investors only to
+ * the portal, operators only to the dashboard.
+ */
+export function safeNext(next: unknown, role: SessionUser["role"]): string {
+  const path = typeof next === "string" ? next : "";
+  if (role === "investor") return /^\/owner(\/[A-Za-z0-9-]+(\/statement)?)?$/.test(path) ? path : "/owner";
+  return /^\/(?!\/)(?!owner)[A-Za-z0-9/_-]*$/.test(path) ? path : "/";
 }

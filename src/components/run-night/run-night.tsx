@@ -23,7 +23,8 @@ import {
 } from "lucide-react";
 import type { AgentRun, AgentStep, Visit } from "@/types";
 import { getMachines, runNight } from "@/lib/api";
-import { DEMO_NOW, formatDate, formatEUR, formatTimeSec } from "@/lib/format";
+import { formatDate, formatEUR, formatTimeSec } from "@/lib/format";
+import { useSimNow } from "@/hooks/use-sim-now";
 import { useAsync } from "@/hooks/use-async";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
@@ -38,6 +39,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 type Phase = "idle" | "running" | "done" | "error";
 
 export function RunNight() {
+  const now = useSimNow();
   const [phase, setPhase] = useState<Phase>("idle");
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [run, setRun] = useState<AgentRun | null>(null);
@@ -88,7 +90,7 @@ export function RunNight() {
       {phase === "done" && run && <SuccessBurst key={run.id + finishedAt} />}
       <PageHeader
         title="Tonight's agent run"
-        description={`Planning the night of ${formatDate(DEMO_NOW)}: stock, forecast, orders and the stocker's route.`}
+        description={`Planning the night of ${formatDate(now)}: stock, forecast, orders and the stocker's route.`}
         actions={
           phase !== "running" && (
             <Button size="lg" variant="outline" onClick={reset} className="h-11 px-5 text-base">
@@ -212,7 +214,7 @@ function Timeline({
   finishedAt: number;
 }) {
   const [now, setNow] = useState(() => Date.now());
-  const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLOListElement>(null);
 
   useEffect(() => {
     if (phase !== "running") return;
@@ -221,7 +223,9 @@ function Timeline({
   }, [phase]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    // Scroll only the list: scrollIntoView would also scroll the page under the presenter.
+    const list = listRef.current;
+    list?.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
   }, [steps.length]);
 
   const elapsed = ((finishedAt || now) - startedAt) / 1000;
@@ -250,7 +254,7 @@ function Timeline({
         </div>
       </div>
 
-      <ol className="flex-1 space-y-3 overflow-y-auto px-6 py-5" aria-live="polite">
+      <ol ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-6 py-5" aria-live="polite">
         {steps.map((s, i) => (
           <StepItem key={s.id} step={s} active={phase === "running" && i === steps.length - 1} />
         ))}
@@ -264,7 +268,6 @@ function Timeline({
             Thinking
           </li>
         )}
-        <div ref={endRef} />
       </ol>
     </section>
   );

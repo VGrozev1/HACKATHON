@@ -25,12 +25,38 @@ const MODELS: Record<Model, { name: string; terms: string }> = {
   C: { name: "Profit share", terms: "50% of the machine's net profit after all costs." },
 };
 
-export function InvestorView({ params }: { params: Promise<{ machineId: string }> }) {
+/**
+ * An investor's own terms, for the investor portal: the statement is locked to their
+ * payout model and value, and the machine picker lists only their machines.
+ */
+export interface FixedTerms {
+  model: Model;
+  value: number;
+  /** "20% of sales", "fixed €120 a month" */
+  terms: string;
+  machineIds: string[];
+}
+
+export function InvestorView({
+  params,
+  fixed,
+  basePath = "/investor",
+}: {
+  params: Promise<{ machineId: string }>;
+  fixed?: FixedTerms;
+  basePath?: string;
+}) {
   const { machineId } = use(params);
   const router = useRouter();
-  const [model, setModel] = useState<Model>("B");
-  const machines = useAsync(getMachines, "machines");
-  const statement = useAsync(() => getInvestorStatement(machineId, model), `statement:${machineId}:${model}`);
+  const [chosen, setChosen] = useState<Model>("B");
+  const model = fixed?.model ?? chosen;
+  const termsText = fixed ? `${fixed.terms.charAt(0).toUpperCase()}${fixed.terms.slice(1)}.` : MODELS[model].terms;
+  const allMachines = useAsync(getMachines, "machines");
+  const machines = { data: allMachines.data?.filter((m) => !fixed || fixed.machineIds.includes(m.id)) };
+  const statement = useAsync(
+    () => getInvestorStatement(machineId, model, fixed?.value),
+    `statement:${machineId}:${model}:${fixed?.value ?? "default"}`,
+  );
   const machine = machines.data?.find((m) => m.id === machineId);
   const s = statement.data;
 
@@ -46,7 +72,7 @@ export function InvestorView({ params }: { params: Promise<{ machineId: string }
             Machine
             <select
               value={machineId}
-              onChange={(e) => router.push(`/investor/${e.target.value}`)}
+              onChange={(e) => router.push(`${basePath}/${e.target.value}${fixed ? "/statement" : ""}`)}
               className="h-10 min-w-64 rounded-lg border bg-card px-3 text-base text-foreground"
               disabled={!machines.data}
             >
@@ -69,14 +95,18 @@ export function InvestorView({ params }: { params: Promise<{ machineId: string }
           <div>
             <div className="text-sm font-semibold tracking-wider text-muted-foreground uppercase">Payout model</div>
             <p className="mt-1 text-base">
-              <b>{MODELS[model].name}.</b> {MODELS[model].terms}
+              <b>{MODELS[model].name}.</b> {termsText}
             </p>
           </div>
-          <Segmented
-            value={model}
-            onChange={setModel}
-            options={(["A", "B", "C"] as Model[]).map((m) => ({ value: m, label: `${m} · ${MODELS[m].name}` }))}
-          />
+          {fixed ? (
+            <span className="text-sm text-muted-foreground">Your contract terms</span>
+          ) : (
+            <Segmented
+              value={model}
+              onChange={setChosen}
+              options={(["A", "B", "C"] as Model[]).map((m) => ({ value: m, label: `${m} · ${MODELS[m].name}` }))}
+            />
+          )}
         </div>
       </div>
 
@@ -123,14 +153,14 @@ export function InvestorView({ params }: { params: Promise<{ machineId: string }
             <RowsSkeleton rows={7} />
           </div>
         ) : (
-          <StatementBody statement={s} model={model} />
+          <StatementBody statement={s} model={model} termsText={termsText} />
         )}
       </article>
     </div>
   );
 }
 
-function StatementBody({ statement: s, model }: { statement: InvestorStatement; model: Model }) {
+function StatementBody({ statement: s, model, termsText }: { statement: InvestorStatement; model: Model; termsText: string }) {
   const net = s.sales - s.costs;
   return (
     <>
@@ -163,7 +193,7 @@ function StatementBody({ statement: s, model }: { statement: InvestorStatement; 
         <div>
           <div className="text-sm font-semibold tracking-wider text-muted-foreground uppercase">Payout to investor</div>
           <div className="mt-1 text-base">
-            Model {model}, {MODELS[model].terms.charAt(0).toLowerCase() + MODELS[model].terms.slice(1)}
+            Model {model}, {termsText.charAt(0).toLowerCase() + termsText.slice(1)}
           </div>
         </div>
         <div className="font-serif text-4xl font-semibold tabular-nums">{formatEUR(s.payout)}</div>

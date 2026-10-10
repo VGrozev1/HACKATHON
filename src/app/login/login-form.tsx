@@ -10,7 +10,8 @@ const initial: LoginState = { error: null, username: "" };
 
 export function LoginForm() {
   const [state, action, pending] = useActionState(login, initial);
-  const next = useSearchParams().get("next") ?? "/owner";
+  // Where to go afterwards; the server checks it against the account's role.
+  const next = useSearchParams().get("next") ?? "";
 
   return (
     <form action={action} className="space-y-5">

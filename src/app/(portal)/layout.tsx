@@ -6,6 +6,7 @@ import { Suspense } from "react";
 import { LogOut } from "lucide-react";
 import { getCurrentInvestor } from "@/lib/auth";
 import { logout } from "../login/actions";
+import { SimClock } from "@/components/sim-clock";
 
 export default function PortalLayout({ children }: LayoutProps<"/">) {
   return (
@@ -24,6 +25,7 @@ export default function PortalLayout({ children }: LayoutProps<"/">) {
         </div>
       </header>
       <main className="mx-auto w-full max-w-[1400px] flex-1 px-6 py-8">{children}</main>
+      <SimClock />
     </div>
   );
 }

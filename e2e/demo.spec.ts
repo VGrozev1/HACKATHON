@@ -17,7 +17,8 @@ async function expectNoSideScroll(page: Page) {
 // we approve), exactly as they do in front of the judges.
 test("judges' demo: dashboard → run night → approve → accept a suggestion → fast-forward → benchmark", async ({ page }) => {
   // 1. Dashboard.
-  await page.goto("/");
+  await signIn(page, "operator", "/");
+  await expect(page).toHaveURL((u) => u.pathname === "/");
   await expect(page.getByRole("heading", { name: "Fleet overview" })).toBeVisible();
   await expect(page.locator('a[href^="/machines/"]')).toHaveCount(20);
   await expectNoSideScroll(page);
@@ -63,7 +64,8 @@ test("judges' demo: dashboard → run night → approve → accept a suggestion 
 });
 
 test("tour: map, machine detail and the investor statement", async ({ page }) => {
-  await page.goto("/");
+  await signIn(page, "operator", "/");
+  await expect(page).toHaveURL((u) => u.pathname === "/");
   await page.getByRole("radio", { name: "Map" }).click();
   await expect(page.locator(".leaflet-container")).toBeVisible();
   await expect(page.locator("path.leaflet-interactive")).toHaveCount(20);
@@ -127,7 +129,7 @@ test("investor login: own machines only, sign out", async ({ page }) => {
   // Your own machine: only your machines in the picker, and the machine view.
   await page.locator('main a[href="/owner/SOF-HOS-02"]').click();
   await expect(page).toHaveURL((u) => u.pathname === "/owner/SOF-HOS-02");
-  await expect(page.getByLabel("Machine").locator("option")).toHaveCount(4);
+  await expect(page.getByRole("combobox", { name: "Machine" }).locator("option")).toHaveCount(4);
   await expect(page.locator("section", { hasText: "Inside your machine" }).getByRole("status")).toBeVisible();
   await expectNoSideScroll(page);
 
@@ -160,9 +162,18 @@ test("owner portal: health, profit, the machine view and an agent suggestion", a
   await page.getByRole("button", { name: "Dismiss" }).first().click();
   await expect(page.getByText(/Dismissed: /)).toBeVisible();
 
+  // The full statement stays in the portal, on the investor's own terms (B, 20%).
+  await page.getByRole("link", { name: /Full statement/ }).click();
+  await expect(page).toHaveURL((u) => u.pathname === "/owner/SOF-GYM-01/statement");
+  await expect(page.getByText("Payout to investor")).toBeVisible();
+  await expect(page.getByText("Your contract terms")).toBeVisible();
+  await expect(page.getByRole("article").filter({ hasText: "Payout to investor" })).toContainText("20% of sales");
+  await page.getByRole("link", { name: /Back to the machine/ }).click();
+  await expect(page).toHaveURL((u) => u.pathname === "/owner/SOF-GYM-01");
+
   // Lozenets Capital owns 2 machines; switch to the other one.
-  await expect(page.getByLabel("Machine").locator("option")).toHaveCount(2);
-  await page.getByLabel("Machine").selectOption("SOF-OFF-08");
+  await expect(page.getByRole("combobox", { name: "Machine" }).locator("option")).toHaveCount(2);
+  await page.getByRole("combobox", { name: "Machine" }).selectOption("SOF-OFF-08");
   await expect(page).toHaveURL((u) => u.pathname === "/owner/SOF-OFF-08");
   await expectNoSideScroll(page);
 });
@@ -171,4 +182,18 @@ test("owner portal: an offline machine leads with the repair", async ({ page }) 
   await signIn(page, "iskar", "/owner/SOF-OFF-02");
   await expect(page).toHaveURL((u) => u.pathname === "/owner/SOF-OFF-02");
   await expect(page.getByText("Book a technician for the card reader")).toBeVisible();
+});
+
+test("the operator dashboard needs an operator", async ({ page }) => {
+  // Signed out: the dashboard sends you to the login page.
+  await page.goto("/orders");
+  await expect(page).toHaveURL((u) => u.pathname === "/login");
+
+  // An investor is sent back to their portal, never into the operator screens.
+  await signIn(page, "vitosha", "/owner");
+  await expect(page).toHaveURL((u) => u.pathname === "/owner");
+  await page.goto("/orders");
+  await expect(page).toHaveURL((u) => u.pathname === "/owner");
+  await page.goto("/run-night");
+  await expect(page).toHaveURL((u) => u.pathname === "/owner");
 });

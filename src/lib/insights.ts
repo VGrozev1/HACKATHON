@@ -3,7 +3,7 @@
 // Pure functions, so they work the same on mock data and on the real API's data.
 
 import type { AgentSuggestion, InvestorStatement, Machine, ProfitWeek, SalesPoint, Slot } from "@/types";
-import { addDays, DEMO_NOW } from "@/lib/format";
+import { addDays, getSimNow, hoursUntil } from "@/lib/format";
 
 // ─── Cost model ──────────────────────────────────────────────────────────────
 
@@ -17,18 +17,24 @@ const FIXED_PER_DAY = (RENT + SERVICING + TELEMETRY) / 30;
 /** Average margin per unit, used for suggestion estimates when prices aren't known. */
 const AVG_MARGIN = 1.6;
 
+/** "20% of sales", "fixed €120 a month": an investor's payout terms in words. */
+export const payoutTerms = (i: { payoutModel: "A" | "B" | "C"; payoutValue: number }) =>
+  i.payoutModel === "A"
+    ? `fixed €${i.payoutValue} a month`
+    : `${Math.round(i.payoutValue * 100)}% of ${i.payoutModel === "B" ? "sales" : "net profit"}`;
+
 /** Payout terms: A fixed monthly fee, B share of sales, C share of net profit. */
 export const PAYOUT_TERMS = { A: 220, B: 0.15, C: 0.5 } as const;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** The last full month before the simulated today, e.g. "2026-09". */
-export const STATEMENT_MONTH = (() => {
-  const d = new Date(DEMO_NOW);
+export function statementMonth(now: Date = getSimNow()): string {
+  const d = new Date(now);
   d.setUTCDate(1);
   d.setUTCMonth(d.getUTCMonth() - 1);
   return d.toISOString().slice(0, 7);
-})();
+}
 
 // ─── Statement ───────────────────────────────────────────────────────────────
 
@@ -36,7 +42,7 @@ export function statementFromSales(
   machineId: string,
   sales: SalesPoint[],
   model: "A" | "B" | "C",
-  month = STATEMENT_MONTH,
+  month = statementMonth(),
   /** The investor's own terms (A: € a month, B/C: share 0–1); defaults to PAYOUT_TERMS. */
   value?: number,
 ): InvestorStatement {
@@ -113,13 +119,15 @@ export function suggestionsFrom({
     ? recent.reduce((s, d) => s + d.revenue, 0) / recent.reduce((s, d) => s + d.units, 0)
     : 2.2;
   const out: AgentSuggestion[] = [];
-  const add = (s: Omit<AgentSuggestion, "id" | "machineId" | "status">) =>
-    out.push({ ...s, id: `${machine.id}-sg-${out.length + 1}`, machineId: machine.id, status: "open" });
+  // The id names what the suggestion is about, so a stored decision stays with it
+  // even when other suggestions appear or disappear as the machine's state changes.
+  const add = (subject: string, s: Omit<AgentSuggestion, "id" | "machineId" | "status">) =>
+    out.push({ ...s, id: `${machine.id}-${s.kind}-${subject}`, machineId: machine.id, status: "open" });
 
   // Repairs first: lost sales cost the most.
   if (machine.status === "offline") {
     const alert = machine.alerts.find((a) => a.severity === "critical");
-    add({
+    add("offline", {
       kind: "service",
       title: "Book a technician for the card reader",
       reason: `${alert ? `${alert.title}. ` : ""}Card sales are lost while it is down; cash may still work.`,
@@ -129,7 +137,7 @@ export function suggestionsFrom({
   } else {
     const stalled = machine.alerts.find((a) => a.severity === "critical");
     if (stalled) {
-      add({
+      add("stalled", {
         kind: "service",
         title: "Send someone to check the machine today",
         reason: `${stalled.title}.${stalled.likelyCause ? ` Likely cause: ${stalled.likelyCause}.` : ""}`,
@@ -144,7 +152,7 @@ export function suggestionsFrom({
   if (soldOut) {
     const p = soldOut.product;
     const sameSlots = slots.filter((s) => s.product.id === p.id).length;
-    add({
+    add(soldOut.product.id, {
       kind: "price",
       title: p.price > 0 ? `Raise ${p.name} from €${p.price.toFixed(2)} to €${(p.price + 0.2).toFixed(2)}` : `Raise ${p.name} by €0.20`,
       reason: "It sold out before the last visit, so demand is higher than the shelf. A small rise keeps most buyers and pays for an extra restock.",
@@ -156,13 +164,13 @@ export function suggestionsFrom({
   // Fresh food that expires: give the slot to the best seller.
   const isFresh = (s: Slot) => (s.product.shelfLifeDays > 0 ? s.product.shelfLifeDays <= 3 : /sandwich|salad|wrap|banitsa|yogurt/i.test(s.product.name));
   const expiring = slots.find(
-    (s) => isFresh(s) && s.quantity > 0 && s.expiryDate && new Date(s.expiryDate).getTime() - DEMO_NOW.getTime() < 48 * 3_600_000,
+    (s) => isFresh(s) && s.quantity > 0 && hoursUntil(s.expiryDate) < 48,
   );
   const fresh = expiring ?? slots.find(isFresh);
   const best = slots[0];
   if (fresh && best && fresh.product.id !== best.product.id) {
     const margin = best.product.price > 0 ? best.product.price - best.product.cost : AVG_MARGIN;
-    add({
+    add(fresh.id, {
       kind: "swap",
       title: `Swap ${fresh.product.name} (${fresh.id.split("-").pop()}) for another ${best.product.name} slot`,
       reason: expiring
@@ -175,7 +183,7 @@ export function suggestionsFrom({
 
   // Restock rhythm.
   if (machine.stockPercent < 40) {
-    add({
+    add("visits", {
       kind: "restock",
       title: machine.locationType === "gym" ? "Add a Friday evening visit" : "Visit right before the busiest days",
       reason:
