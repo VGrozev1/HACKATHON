@@ -18,7 +18,11 @@ import { Button } from "@/components/ui/button";
 const DAYS = 7;
 type Phase = "idle" | "running" | "done" | "error";
 
+/** How much lower the agent's number is than the fixed order's, in % (negative: higher). */
 const pctFewer = (agent: number, fixed: number) => (fixed > 0 ? Math.round(((fixed - agent) / fixed) * 100) : 0);
+/** "73% less", "the same", "12% more": honest whichever way the result goes. */
+const compareText = (pct: number, less: string, more: string) =>
+  pct > 0 ? `${pct}% ${less}` : pct < 0 ? `${-pct}% ${more}` : "the same";
 
 export function SimulationView() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -125,8 +129,18 @@ export function SimulationView() {
 function Results({ result }: { result: BenchmarkResult }) {
   const stockOutPct = pctFewer(result.agent.stockOuts, result.fixedOrder.stockOuts);
   const wastePct = pctFewer(result.agent.expiredProducts, result.fixedOrder.expiredProducts);
-  const shown = useCountUp(stockOutPct, 1600);
+  const shown = useCountUp(Math.abs(stockOutPct), 1600);
   const hasRevenue = result.agent.revenue > 0 || result.fixedOrder.revenue > 0;
+  const money = (r: BenchmarkResult["agent"]) => (r.lostRevenue ?? 0) + (r.wastedCost ?? 0);
+  const hasMoney = result.agent.lostRevenue !== undefined && result.fixedOrder.lostRevenue !== undefined;
+  const saved = money(result.fixedOrder) - money(result.agent);
+  // The headline follows the data: a win, a tie or a loss is stated as it is.
+  const headline =
+    stockOutPct > 0
+      ? { big: `${Math.round(shown)}%`, line: "fewer stock-outs than a fixed weekly order", icon: true }
+      : stockOutPct < 0
+        ? { big: `+${Math.round(shown)}%`, line: "more stock-outs than a fixed weekly order", icon: false }
+        : { big: "Even", line: "the same stock-outs as a fixed weekly order", icon: false };
 
   return (
     <div className="animate-step-in space-y-6">
@@ -136,20 +150,31 @@ function Results({ result }: { result: BenchmarkResult }) {
           <div>
             <p className="text-lg font-semibold text-sidebar-primary">After {result.days} simulated days</p>
             <p className="mt-2 flex items-baseline gap-4">
-              <span className="text-8xl font-black tracking-tight tabular-nums lg:text-9xl">{Math.round(shown)}%</span>
-              <TrendingDown className="size-14 text-sidebar-primary" aria-hidden />
+              <span className="text-8xl font-black tracking-tight tabular-nums lg:text-9xl">{headline.big}</span>
+              {headline.icon && <TrendingDown className="size-14 text-sidebar-primary" aria-hidden />}
             </p>
-            <p className="mt-2 text-3xl font-semibold">fewer stock-outs than a fixed weekly order</p>
+            <p className="mt-2 text-3xl font-semibold">{headline.line}</p>
+            <p className="mt-2 text-base text-white/70">Same simulated demand for both; a stock-out is a sale missed because the slot was empty.</p>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <BigFigure label="Less waste" value={`${wastePct}%`} sub={`${result.agent.expiredProducts} vs ${result.fixedOrder.expiredProducts} expired`} />
+          <div className="grid w-full gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <BigFigure
+              label="Waste"
+              value={compareText(wastePct, "less", "more")}
+              sub={`${result.agent.expiredProducts} vs ${result.fixedOrder.expiredProducts} products expired`}
+            />
             <BigFigure label="Stock-outs" value={`${result.agent.stockOuts} vs ${result.fixedOrder.stockOuts}`} sub="agent vs fixed order" />
+            {hasMoney && (
+              <BigFigure
+                label={saved >= 0 ? "Money saved" : "Money lost"}
+                value={formatEURRound(Math.abs(saved))}
+                sub={`missed sales and waste: ${formatEURRound(money(result.agent))} vs ${formatEURRound(money(result.fixedOrder))}`}
+              />
+            )}
             {hasRevenue && (
               <BigFigure
                 label="Extra revenue"
                 value={`+${formatEURRound(result.agent.revenue - result.fixedOrder.revenue)}`}
                 sub={`${formatEURRound(result.agent.revenue)} vs ${formatEURRound(result.fixedOrder.revenue)}`}
-                className="sm:col-span-2"
               />
             )}
           </div>
@@ -165,7 +190,7 @@ function Results({ result }: { result: BenchmarkResult }) {
             ]}
           />
         </Panel>
-        <Panel title="Stock-outs per day" description="The fixed order runs dry as the week goes on; the agent reorders in time.">
+        <Panel title="Stock-outs per day" description="Sales missed each day because a slot was empty.">
           <DailyStockOutsChart data={result.daily} />
         </Panel>
       </div>

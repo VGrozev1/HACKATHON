@@ -100,10 +100,22 @@ export interface AgentRun {
   summary: string;
 }
 
+export interface StrategyTotals {
+  /** Sales missed because a slot was empty. */
+  stockOuts: number;
+  expiredProducts: number;
+  /** Total sales, when known (mock only); 0 when not reported. */
+  revenue: number;
+  /** € of sales missed to empty slots. */
+  lostRevenue?: number;
+  /** € of stock thrown away after expiring. */
+  wastedCost?: number;
+}
+
 export interface BenchmarkResult {
   days: number;
-  agent: { stockOuts: number; expiredProducts: number; revenue: number };
-  fixedOrder: { stockOuts: number; expiredProducts: number; revenue: number };
+  agent: StrategyTotals;
+  fixedOrder: StrategyTotals;
   daily: { date: string; agentStockOuts: number; fixedStockOuts: number }[];
 }
 

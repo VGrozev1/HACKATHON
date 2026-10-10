@@ -491,22 +491,50 @@ async function mockRunNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
 // ─── Simulation ──────────────────────────────────────────────────────────────
 
 /** POST /api/sim/fast-forward?days=7 */
+function fromBenchmark(b: Contract.Benchmark): BenchmarkResult {
+  // The contract reports lost revenue rather than revenue; screens hide revenue when it's 0.
+  const totals = (r: Contract.StrategyResult) => ({
+    stockOuts: r.stockOuts,
+    expiredProducts: r.expiredUnits,
+    revenue: 0,
+    lostRevenue: r.lostRevenue,
+    wastedCost: r.wastedCost,
+  });
+  return {
+    days: b.daily.length,
+    agent: totals(b.agent),
+    fixedOrder: totals(b.fixedWeeklyOrder),
+    daily: b.daily.map((d) => ({ date: d.day, agentStockOuts: d.agentStockOuts, fixedStockOuts: d.fixedStockOuts })),
+  };
+}
+
+/**
+ * POST /api/sim/fast-forward?days=7, then GET /api/benchmark for the result (A8): the
+ * agent against a fixed weekly order on the same simulated demand. Falls back to the
+ * benchmark in the fast-forward response if the second call fails.
+ */
 export function fastForward(days = 7): Promise<BenchmarkResult> {
   return withBackup(
     "fastForward",
     async () => {
       const res = await http<Contract.FastForwardResponse>(`/api/sim/fast-forward?days=${days}`, { method: "POST" });
-      const b = res.benchmark;
-      return {
-        days: res.daysSimulated,
-        // The contract reports lost revenue rather than revenue; screens hide revenue when it's 0.
-        agent: { stockOuts: b.agent.stockOuts, expiredProducts: b.agent.expiredUnits, revenue: 0 },
-        fixedOrder: { stockOuts: b.fixedWeeklyOrder.stockOuts, expiredProducts: b.fixedWeeklyOrder.expiredUnits, revenue: 0 },
-        daily: b.daily.map((d) => ({ date: d.day, agentStockOuts: d.agentStockOuts, fixedStockOuts: d.fixedStockOuts })),
-      };
+      const b = await http<Contract.Benchmark>("/api/benchmark").catch(() => res.benchmark);
+      return fromBenchmark(b);
     },
     async () => {
       await sleep(4000);
+      return benchmarkResult;
+    },
+  );
+}
+
+/** GET /api/benchmark: the last fast-forward's result, or a dry run of the next 7 days. */
+export function getBenchmark(): Promise<BenchmarkResult> {
+  return withBackup(
+    "getBenchmark",
+    async () => fromBenchmark(await http<Contract.Benchmark>("/api/benchmark")),
+    async () => {
+      await latency();
       return benchmarkResult;
     },
   );
