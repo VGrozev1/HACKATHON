@@ -1,15 +1,18 @@
 // The operator dashboard: everything here (orders, approvals, the agent run) needs an
-// operator session. The session is read from the request cookie, so the gate and the
-// account bar stream in behind Suspense boundaries.
+// operator session, checked up front; the account bar streams in separately
+// behind its own Suspense boundary since it never redirects.
 
 import { Suspense } from "react";
 import { LogOut } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
-import { GridSkeleton } from "@/components/states";
 import { getCurrentOperator, requireOperator } from "@/lib/auth";
 import { logout } from "../login/actions";
 
-export default function DashboardLayout({ children }: LayoutProps<"/">) {
+// requireOperator can redirect() — that has to happen outside any <Suspense>
+// boundary, or Next's Cache Components "instant navigation" validation
+// errors out for a signed-out visitor instead of just redirecting them.
+export default async function DashboardLayout({ children }: LayoutProps<"/">) {
+  await requireOperator("/");
   return (
     <AppShell
       account={
@@ -18,16 +21,9 @@ export default function DashboardLayout({ children }: LayoutProps<"/">) {
         </Suspense>
       }
     >
-      <Suspense fallback={<GridSkeleton count={4} />}>
-        <OperatorGate>{children}</OperatorGate>
-      </Suspense>
+      {children}
     </AppShell>
   );
-}
-
-async function OperatorGate({ children }: { children: React.ReactNode }) {
-  await requireOperator("/");
-  return <>{children}</>;
 }
 
 async function OperatorBar() {

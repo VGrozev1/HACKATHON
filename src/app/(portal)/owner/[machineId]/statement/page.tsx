@@ -6,16 +6,11 @@ import { RowsSkeleton } from "@/components/states";
 import { requireInvestor } from "@/lib/auth";
 import { payoutTerms } from "@/lib/insights";
 
-export default function PortalStatementPage({ params }: PageProps<"/owner/[machineId]/statement">) {
-  return (
-    <Suspense fallback={<RowsSkeleton rows={8} className="mx-auto max-w-5xl" />}>
-      <GuardedStatement params={params} />
-    </Suspense>
-  );
-}
-
-/** The investor's own statement: their machines only, locked to their payout terms. */
-async function GuardedStatement({ params }: { params: Promise<{ machineId: string }> }) {
+// requireInvestor/redirect() have to run outside any <Suspense> boundary,
+// or Next's Cache Components "instant navigation" validation errors out
+// for a signed-out visitor (or one viewing someone else's machine) instead
+// of just redirecting them.
+export default async function PortalStatementPage({ params }: PageProps<"/owner/[machineId]/statement">) {
   const { machineId } = await params;
   const investor = await requireInvestor(`/owner/${machineId}/statement`);
   if (!investor.machineIds.includes(machineId)) redirect("/owner");
@@ -24,16 +19,18 @@ async function GuardedStatement({ params }: { params: Promise<{ machineId: strin
       <Link href={`/owner/${machineId}`} className="mx-auto mb-4 block max-w-5xl text-sm font-bold tracking-wider text-primary uppercase hover:underline">
         ← Back to the machine
       </Link>
-      <InvestorView
-        params={params}
-        basePath="/owner"
-        fixed={{
-          model: investor.payoutModel,
-          value: investor.payoutValue,
-          terms: payoutTerms(investor),
-          machineIds: investor.machineIds,
-        }}
-      />
+      <Suspense fallback={<RowsSkeleton rows={8} className="mx-auto max-w-5xl" />}>
+        <InvestorView
+          params={params}
+          basePath="/owner"
+          fixed={{
+            model: investor.payoutModel,
+            value: investor.payoutValue,
+            terms: payoutTerms(investor),
+            machineIds: investor.machineIds,
+          }}
+        />
+      </Suspense>
     </>
   );
 }

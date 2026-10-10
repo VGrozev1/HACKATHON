@@ -4,19 +4,18 @@ import { OwnerPortal } from "@/components/owner/owner-portal";
 import { GridSkeleton } from "@/components/states";
 import { requireInvestor } from "@/lib/auth";
 
-export default function OwnerPage({ params }: PageProps<"/owner/[machineId]">) {
-  return (
-    <Suspense fallback={<GridSkeleton count={4} />}>
-      <GuardedPortal params={params} />
-    </Suspense>
-  );
-}
-
-/** Signed-in investors only, and only for a machine they own. */
-async function GuardedPortal({ params }: { params: Promise<{ machineId: string }> }) {
+// requireInvestor/redirect() have to run outside any <Suspense> boundary,
+// or Next's Cache Components "instant navigation" validation errors out
+// for a signed-out visitor (or one viewing someone else's machine) instead
+// of just redirecting them.
+export default async function OwnerPage({ params }: PageProps<"/owner/[machineId]">) {
   const { machineId } = await params;
   const investor = await requireInvestor(`/owner/${machineId}`);
   if (!investor.machineIds.includes(machineId)) redirect("/owner");
   const { name, payoutModel, payoutValue, machineIds } = investor;
-  return <OwnerPortal machineId={machineId} investor={{ name, payoutModel, payoutValue, machineIds }} />;
+  return (
+    <Suspense fallback={<GridSkeleton count={4} />}>
+      <OwnerPortal machineId={machineId} investor={{ name, payoutModel, payoutValue, machineIds }} />
+    </Suspense>
+  );
 }
