@@ -1,4 +1,7 @@
-import { checkOrder } from "./guardrails.ts";
+import { checkOrder, type OrderCatalog } from "./guardrails.ts";
+import { suppliers, products, warehouse, avgDailySales } from "./mock-data.ts";
+
+const catalog: OrderCatalog = { suppliers, products, warehouse, avgDailySales };
 
 type OrderLine = { product: string; quantity: number };
 
@@ -45,7 +48,7 @@ const cases: TestCase[] = [
 let failures = 0;
 
 for (const testCase of cases) {
-  const result = checkOrder(testCase.supplier, testCase.lines);
+  const result = checkOrder(testCase.supplier, testCase.lines, catalog);
   const passed = result.status === testCase.expectedStatus;
   if (!passed) failures++;
 

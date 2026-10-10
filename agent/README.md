@@ -97,12 +97,36 @@ node test-tools.ts
   so the button stops spinning. Accepting/rejecting a suggestion only flips
   its stored status — it never touches prices, stock, or orders.
 
+## Real data vs. mock data (`USE_MOCK`)
+
+`mock-data.ts` has the full breakdown; in short:
+
+- **Real when `USE_MOCK` is unset:** `list_machines`, `get_stock`, `forecast`,
+  `plan_route`, and `check_alerts` all call Todor's real `/api/machines`
+  endpoints. `check_alerts` gets a richer set of alert kinds for free this way
+  (stock-out, expiring food) than the mock data models.
+- **Mock-only regardless of `USE_MOCK`** — no real source exists yet:
+  - Product catalog (names, prices, shelf life) and the approved supplier
+    list — no `/api/products` or `/api/suppliers` endpoint. Worse: Todor's
+    real catalog (29 products) isn't even the same catalog as this file's 5
+    invented ones, so this isn't just "point it at a URL" once one exists.
+  - Warehouse capacity/current stock — no endpoint.
+  - `create_purchase_order` only ever appends to an in-memory array; there's
+    no `POST /api/orders` to persist a real one (only `GET /api/orders` and
+    `POST /api/orders/:id/approve` exist for orders that already exist).
+  - Average daily sales per product — feeds the shelf-life guardrail math;
+    no real per-product fleet-wide rate to use instead yet.
+  - `openingHours`, `hoursSinceLastSale`, `todaySales`, `cashReports` — dead
+    weight in real mode now that `check_alerts` reads the server's own
+    alerts; kept only so `USE_MOCK=1` demos still have something to detect.
+
+These need either a new real endpoint (Todor) or a product/supplier catalog
+that matches the real one, not a `tools.ts` change — tracked as open
+questions, not bugs.
+
 ## Known gaps
 
-- Only `list_machines` and `get_stock` currently call Todor's real API
-  (`USE_MOCK` unset); the rest of the tools are still mock-only pending the
-  real endpoints.
-- The dashboard's "run night" button now spawns a real `node agent.ts`
+- The dashboard's "run night" button spawns a real `node agent.ts`
   process (`src/app/api/agent/run-night` → `src/app/api/agent/runs/[id]`,
   reading `runs/<runId>.json` as it's written). It needs
   `NEXT_PUBLIC_AGENT_LIVE=true` to be used instead of the scripted mock, and
