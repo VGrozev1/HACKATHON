@@ -4,6 +4,8 @@ import {
   stock,
   avgDailySales,
   warehouse,
+  suppliers,
+  products,
   openingHours,
   hoursSinceLastSale,
   todaySales,
@@ -14,6 +16,7 @@ import {
   checkOrder,
   checkSuggestion,
   type OrderStatus,
+  type OrderCatalog,
   type SuggestionType,
 } from "./guardrails.ts";
 import { sendSupplierEmail } from "./email.ts";
@@ -22,7 +25,7 @@ import { apiGet } from "./api.ts";
 // Type-only — erased at runtime, so this never creates an actual
 // dependency on Todor's code. It just keeps our shapes honest to the
 // contract in api.md as he fills in the real endpoints.
-import type { MachineSummary, MachineDetail, SlotStock } from "../src/lib/api-types.ts";
+import type { MachineSummary, MachineDetail, MachineForecast, SlotStock, Alert } from "../src/lib/api-types.ts";
 
 // ---- Tool descriptions (what we show Claude) -----------------------------
 
@@ -184,8 +187,9 @@ export const tools: Anthropic.Tool[] = [
     name: "check_alerts",
     description:
       "Check every machine for operational problems: offline (no sale in 6+ hours during opening time), " +
-      "sudden zero sales on a normally-popular product (possible jammed slot), or cash collected differing " +
-      "from the fiscal report by over €2. Detection is deterministic — you explain the likely cause of each.",
+      "sudden zero sales on a normally-popular product (possible jammed slot), cash collected differing " +
+      "from the fiscal report by over €2, an empty slot (stock-out), or food about to expire. Detection is " +
+      "deterministic; some alerts already include a likely cause, otherwise explain one yourself.",
     input_schema: {
       type: "object",
       properties: {},
@@ -348,13 +352,10 @@ async function getStock(machineId: string): Promise<SlotStock[] | { error: strin
   return detail.slots;
 }
 
-function forecast(machineId: string, days: number) {
+function mockForecast(machineId: string, days: number) {
   const machineStock = stock[machineId];
   if (!machineStock) {
     return { error: `Unknown machine ID "${machineId}"` };
-  }
-  if (!Number.isInteger(days) || days < 1 || days > 7) {
-    return { error: `"days" must be an integer between 1 and 7, got ${days}` };
   }
 
   const salesForMachine = avgDailySales[machineId] ?? {};
@@ -370,6 +371,42 @@ function forecast(machineId: string, days: number) {
   return { machine_id: machineId, days, forecast: forecastLines };
 }
 
+// Days between two "YYYY-MM-DD" strings (at least 1, so a same-day window
+// never divides by zero).
+function dayCount(from: string, until: string): number {
+  return Math.max(1, Math.round((Date.parse(until) - Date.parse(from)) / 86400000));
+}
+
+async function forecast(machineId: string, days: number) {
+  if (!Number.isInteger(days) || days < 1 || days > 7) {
+    return { error: `"days" must be an integer between 1 and 7, got ${days}` };
+  }
+  if (process.env.USE_MOCK === "1") {
+    return mockForecast(machineId, days);
+  }
+
+  // Todor's real forecast (A5/B4) is a baseline over "until the next visit",
+  // not a fixed N-day window — convert it to a per-day rate, then project
+  // that rate over the days Claude actually asked for. It only has slot ids
+  // and product ids, so join against the machine detail for product names.
+  const [detail, fc] = await Promise.all([
+    apiGet<MachineDetail>(`/api/machines/${encodeURIComponent(machineId)}`),
+    apiGet<MachineForecast>(`/api/machines/${encodeURIComponent(machineId)}/forecast`),
+  ]);
+  const productNameBySlot = new Map(detail.slots.map((s) => [s.slotId, s.productName]));
+  const windowDays = dayCount(fc.from, fc.until);
+  const forecastLines = fc.slots.map((s) => {
+    const daily = s.baseline / windowDays;
+    return {
+      product: productNameBySlot.get(s.slotId) ?? s.productId,
+      avgDailySales: Math.round(daily * 100) / 100,
+      expectedUnits: Math.round(daily * days),
+    };
+  });
+
+  return { machine_id: machineId, days, forecast: forecastLines };
+}
+
 // Straight-line distance between two coordinates. Good enough for a city
 // the size of Sofia — not meant to replace real mapping/routing software.
 function distance(a: Coordinates, b: Coordinates): number {
@@ -378,17 +415,24 @@ function distance(a: Coordinates, b: Coordinates): number {
   return Math.sqrt(dLat * dLat + dLng * dLng);
 }
 
-function planRoute(machineIds: string[]) {
-  const stops = [];
+async function planRoute(machineIds: string[]) {
+  // list_machines already resolves to the real fleet when it's available —
+  // reusing it here means plan_route gets real coordinates for free, with
+  // no separate mock/real branch of its own.
+  const fleet = await listMachines();
+  const byId = new Map(fleet.map((m) => [m.id, { lat: m.lat, lng: m.lng }]));
+
+  const stops: { id: string; location: Coordinates }[] = [];
   for (const id of machineIds) {
-    const machine = machines.find((m) => m.id === id);
-    if (!machine) {
+    const location = byId.get(id);
+    if (!location) {
       return { error: `Unknown machine ID "${id}"` };
     }
-    stops.push(machine);
+    stops.push({ id, location });
   }
 
-  // Nearest-neighbour: start at the warehouse, repeatedly jump to whichever
+  // Nearest-neighbour: start at the warehouse (no real endpoint for this —
+  // it's one fixed address, not fleet data), repeatedly jump to whichever
   // remaining stop is closest to wherever we currently are.
   const remaining = [...stops];
   const route: string[] = [];
@@ -497,7 +541,11 @@ const OFFLINE_HOURS_THRESHOLD = 6;
 const ZERO_SALES_DAILY_THRESHOLD = 10;
 const CASH_MISMATCH_THRESHOLD_EUR = 2;
 
-export type AlertKind = "OFFLINE" | "ZERO_SALES" | "CASH_MISMATCH";
+// Real alerts (from /api/machines) cover two more kinds than the mock
+// data models: STOCK_OUT (a slot is empty right now) and EXPIRING (food
+// about to go off). Both are self-explanatory from their message, so
+// there's no extra "likely cause" reasoning needed for them.
+export type AlertKind = "OFFLINE" | "ZERO_SALES" | "CASH_MISMATCH" | "STOCK_OUT" | "EXPIRING";
 
 export type AlertFact = {
   machineId: string;
@@ -505,10 +553,11 @@ export type AlertFact = {
   message: string;
 };
 
-// Pure detection — every number here is a fact from (mock) data, not a
-// guess. The AI's job is to read these and explain the likely cause in
-// one sentence each; it never decides *whether* something is a problem.
-function checkAlerts(): AlertFact[] {
+// Pure detection against mock-data.ts — every number here is a fact from
+// (mock) data, not a guess. Used only under USE_MOCK=1: the real API has no
+// granular-enough endpoint for opening hours, hour-of-last-sale, per-product
+// daily actuals, or cash reconciliation, so these mock tables stand in.
+function mockCheckAlerts(): AlertFact[] {
   const alerts: AlertFact[] = [];
   const currentHour = new Date().getHours();
 
@@ -556,12 +605,30 @@ function checkAlerts(): AlertFact[] {
   return alerts;
 }
 
+function withCause(alert: Alert): string {
+  return alert.likelyCause ? `${alert.message} (${alert.likelyCause})` : alert.message;
+}
+
+async function checkAlerts(): Promise<AlertFact[]> {
+  if (process.env.USE_MOCK === "1") {
+    return mockCheckAlerts();
+  }
+  // The real /api/machines (A6) already computes every alert kind
+  // server-side from real stock, sales and cash data — no need to rebuild
+  // any of that here.
+  const fleet = await listMachines();
+  return fleet.flatMap((m) => m.alerts.map((a) => ({ machineId: m.id, kind: a.kind, message: withCause(a) })));
+}
+
 async function createPurchaseOrder(
   supplier: string,
   lines: PurchaseOrderLine[],
   reason: string,
 ): Promise<PurchaseOrder> {
-  const { status, totalEur, reasons } = checkOrder(supplier, lines);
+  // No real endpoint yet for the product/supplier catalog or warehouse
+  // capacity — mock-data.ts is the only source either mode has for these.
+  const catalog: OrderCatalog = { suppliers, products, warehouse, avgDailySales };
+  const { status, totalEur, reasons } = checkOrder(supplier, lines, catalog);
 
   const order: PurchaseOrder = {
     id: `PO-${String(nextOrderId++).padStart(4, "0")}`,
@@ -606,14 +673,23 @@ async function createSuggestion(
   expectedEffect: string,
   percentChange: number | undefined,
 ): Promise<Suggestion> {
-  const check = checkSuggestion({ type, machineId, product, percentChange }, pendingSuggestionsTonight);
+  // One fetch of the real fleet (or mock, via list_machines' own branching)
+  // covers both the "does this machine exist" guardrail and its display name.
+  const fleet = await listMachines();
+  const machine = fleet.find((m) => m.id === machineId);
+  // Products have no real catalog yet — still mock-data.ts either way.
+  const check = checkSuggestion(
+    { type, machineId, product, percentChange },
+    pendingSuggestionsTonight,
+    { machines: fleet, products },
+  );
 
   const record: Suggestion = {
     id: `SUG-${String(nextSuggestionId++).padStart(4, "0")}`,
     runDate: formatLocalDate(new Date()),
     type,
     machineId,
-    machineName: machines.find((m) => m.id === machineId)?.name ?? machineId,
+    machineName: machine?.name ?? machineId,
     product,
     suggestion: suggestionText,
     reason,
