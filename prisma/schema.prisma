@@ -1,0 +1,251 @@
+// Vending AI Agent — shared data model (task S2).
+// Agreed by all three before splitting up. Change it only together:
+// every change here changes the API (api.md) that Viktor and Kalin build against.
+//
+// Conventions
+// - Money is in euros as Float (fine for a demo; no real payments).
+// - Times are UTC. The fleet is in Sofia (Europe/Sofia, UTC+2/+3).
+// - After editing: `npm run db:migrate -- --name <what-changed>` then commit the migration.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Fleet ───────────────────────────────────────────────────────────────────
+
+enum LocationType {
+  GYM
+  OFFICE
+  HOSPITAL
+  UNIVERSITY
+  OTHER
+}
+
+model Machine {
+  id           String       @id // human-readable, e.g. "SOF-GYM-01"
+  name         String // "Gym Lozenets"
+  locationType LocationType
+  city         String       @default("Sofia")
+  address      String?
+  lat          Float
+  lng          Float
+  online       Boolean      @default(true)
+  investorId   String?
+  createdAt    DateTime     @default(now())
+
+  investor   Investor?    @relation(fields: [investorId], references: [id])
+  slots      Slot[]
+  sales      SaleEvent[]
+  stock      StockLevel[]
+  visits     Visit[]
+}
+
+model Product {
+  id                String  @id // e.g. "water-500"
+  name              String // "Devin water 0.5 l"
+  category          String // "drink" | "snack" | "fresh" ...
+  cost              Float // what we pay the supplier per unit, €
+  price             Float // what the customer pays, €
+  shelfLifeDays     Int
+  warehouseCapacity Int     @default(500) // guardrail: never order above this
+  supplierId        String
+
+  supplier   Supplier            @relation(fields: [supplierId], references: [id])
+  slots      Slot[]
+  sales      SaleEvent[]
+  stock      StockLevel[]
+  orderLines PurchaseOrderLine[]
+}
+
+model Slot {
+  id        String @id // "<machineId>-<code>", e.g. "SOF-GYM-01-A1"
+  machineId String
+  code      String // label on the machine, e.g. "A1"
+  productId String
+  capacity  Int
+
+  machine Machine      @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  product Product      @relation(fields: [productId], references: [id])
+  sales   SaleEvent[]
+  stock   StockLevel[]
+
+  @@unique([machineId, code])
+}
+
+// ─── Sales and stock ─────────────────────────────────────────────────────────
+
+enum PaymentType {
+  CARD
+  CASH
+  MOBILE
+}
+
+// One vend. Shape mirrors a card-reader (Nayax/Vendon-style) transaction — see
+// src/lib/sale-event.ts (task S4) for the external format and the mapping.
+model SaleEvent {
+  id          String      @id @default(cuid())
+  externalId  String      @unique // transaction id from the reader (or the simulator)
+  machineId   String
+  slotId      String
+  productId   String // denormalised from the slot at sale time, for fast queries
+  price       Float
+  currency    String      @default("EUR")
+  paymentType PaymentType
+  occurredAt  DateTime
+  simulated   Boolean     @default(true)
+  raw         Json? // original reader payload, kept for debugging
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  slot    Slot    @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([machineId, occurredAt])
+  @@index([productId, occurredAt])
+}
+
+// One batch in one slot. Stock in a slot = sum of its batches' quantity.
+// A batch is created when the stocker loads the slot; sales consume the oldest batch first.
+model StockLevel {
+  id        String   @id @default(cuid())
+  machineId String
+  slotId    String
+  productId String
+  quantity  Int
+  expiresAt DateTime
+  loadedAt  DateTime @default(now())
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  slot    Slot    @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([machineId, slotId])
+}
+
+// ─── Ordering ────────────────────────────────────────────────────────────────
+
+model Supplier {
+  id            String  @id // e.g. "sup-drinks"
+  name          String
+  email         String // purchase orders are emailed here (demo inbox in dev)
+  minOrderValue Float // €, guardrail
+  leadTimeDays  Int // days from order to delivery
+  approved      Boolean @default(true) // guardrail: agent may only order from approved suppliers
+
+  products Product[]
+  orders   PurchaseOrder[]
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  AWAITING_APPROVAL // over the auto-approve limit (€300); waits for a tap in Telegram
+  APPROVED
+  SENT // emailed to the supplier
+  DELIVERED
+  REJECTED
+}
+
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  supplierId   String
+  status       PurchaseOrderStatus @default(DRAFT)
+  total        Float
+  deliveryDate DateTime
+  explanation  String // agent's plain-language reason
+  agentRunId   String?
+  emailId      String? // Resend message id once sent
+  approvedAt   DateTime?
+  approvedBy   String? // Telegram user who tapped "approve"
+  createdAt    DateTime            @default(now())
+
+  supplier Supplier            @relation(fields: [supplierId], references: [id])
+  agentRun AgentRun?           @relation(fields: [agentRunId], references: [id])
+  lines    PurchaseOrderLine[]
+}
+
+model PurchaseOrderLine {
+  id        String @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitCost  Float
+
+  order   PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product       @relation(fields: [productId], references: [id])
+}
+
+// ─── Stocker visits ──────────────────────────────────────────────────────────
+
+enum VisitStatus {
+  PLANNED
+  SENT // load list delivered to the stocker in Telegram
+  DONE // stocker tapped "done"; stock updated
+  SKIPPED
+}
+
+model Visit {
+  id                String      @id @default(cuid())
+  date              DateTime // the day of the route
+  routeOrder        Int // 1 = first stop
+  machineId         String
+  status            VisitStatus @default(PLANNED)
+  // [{ slotId, productId, quantity, reason }]
+  loadList          Json
+  agentRunId        String?
+  telegramMessageId String?
+  doneAt            DateTime?
+
+  machine  Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  agentRun AgentRun? @relation(fields: [agentRunId], references: [id])
+
+  @@index([date, routeOrder])
+}
+
+// ─── Agent ───────────────────────────────────────────────────────────────────
+
+enum AgentRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+// One night of the agent. Every tool call is appended to `steps` so the
+// dashboard can stream it and we can debug why it ordered 200 Red Bulls.
+model AgentRun {
+  id          String         @id @default(cuid())
+  runDate     DateTime // the simulated night this run plans for
+  status      AgentRunStatus @default(RUNNING)
+  // [{ at, type: "thought" | "tool_call" | "tool_result" | "decision", tool?, input?, output?, text? }]
+  steps       Json           @default("[]")
+  // [{ kind: "order" | "visit" | "forecast_adjustment" | "alert", refId?, summary, reason }]
+  decisions   Json           @default("[]")
+  explanation String? // the night's summary in plain language
+  simulated   Boolean        @default(true)
+  startedAt   DateTime       @default(now())
+  finishedAt  DateTime?
+
+  orders PurchaseOrder[]
+  visits Visit[]
+}
+
+// ─── Investor view (C7) ──────────────────────────────────────────────────────
+
+enum PayoutModel {
+  A // fixed monthly rent
+  B // revenue share
+  C // profit share
+}
+
+model Investor {
+  id          String      @id
+  name        String
+  payoutModel PayoutModel
+  // model A: € per month; model B/C: share as 0–1
+  payoutValue Float
+
+  machines Machine[]
+}
