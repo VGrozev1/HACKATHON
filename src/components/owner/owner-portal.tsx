@@ -45,6 +45,7 @@ import { ChartSkeleton, EmptyState, ErrorState, RowsSkeleton } from "@/component
 import { ProfitWeeksChart } from "@/components/charts";
 import { LocationTag, StockBar, stockColor, stockLevel } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { VendingMachine } from "@/components/vending/vending-machine";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function OwnerPortal({ params }: { params: Promise<{ machineId: string }> }) {
@@ -84,6 +85,7 @@ export function OwnerPortal({ params }: { params: Promise<{ machineId: string }>
 
       {m ? <HealthBanner machine={m} /> : <Skeleton className="h-36 rounded-2xl" />}
       <Kpis machineId={machineId} machine={m} />
+      <InsideTheMachine machineId={machineId} machine={m} />
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <ProfitPanel machineId={machineId} />
@@ -240,6 +242,40 @@ function ProfitPanel({ machineId }: { machineId: string }) {
         <ProfitWeeksChart data={profit.data} />
       )}
     </Panel>
+  );
+}
+
+/** The machine as it looks on site: every slot, its products and how many are left. */
+function InsideTheMachine({ machineId, machine }: { machineId: string; machine?: Machine }) {
+  const stock = useAsync(() => getStock(machineId), `stock:${machineId}`);
+  return (
+    <section className="mt-8">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Inside your machine</h2>
+          <p className="mt-1 text-base text-muted-foreground">
+            Every slot as it looks right now. Click a slot, or type its code on the keypad, to see what&apos;s left.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="rounded bg-red-600 px-1 text-[10px] font-black text-white">SOLD OUT</span> empty slot
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-3 rounded-full bg-amber-400" /> expires within 48 h
+          </span>
+        </div>
+      </div>
+      {stock.error ? (
+        <ErrorState error={stock.error} onRetry={stock.retry} />
+      ) : !stock.data || !machine ? (
+        <Skeleton className="h-[640px] rounded-[28px]" />
+      ) : stock.data.length === 0 ? (
+        <EmptyState title="No slots configured" />
+      ) : (
+        <VendingMachine slots={stock.data} name={machine.name} offline={machine.status === "offline"} />
+      )}
+    </section>
   );
 }
 

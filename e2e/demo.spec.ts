@@ -90,6 +90,14 @@ test("owner portal: health, profit and accepting an agent suggestion", async ({ 
   await expect(page.getByText("Profit, last 4 weeks")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sales and profit by week" })).toBeVisible();
 
+  // The machine as it looks on site: type B3 on the keypad and read the display.
+  const machine = page.locator("section", { hasText: "Inside your machine" });
+  await expect(machine.getByRole("button", { name: /^A1 Devin water/ })).toContainText("0/24");
+  await machine.getByRole("button", { name: "B", exact: true }).click();
+  await machine.getByRole("button", { name: "3", exact: true }).click();
+  await expect(machine.getByRole("status")).toContainText("B3 · Peach ice tea 0.5 l");
+  await expect(machine.getByRole("status")).toContainText("left");
+
   await page.getByRole("button", { name: "Accept" }).first().click();
   await expect(page.getByText("Suggestion accepted")).toBeVisible();
   await expect(page.getByText("Accepted: applies from tomorrow night")).toBeVisible();
