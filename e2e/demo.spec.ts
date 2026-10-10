@@ -47,6 +47,9 @@ test("demo path: fleet → machine → run night → approve → simulation → 
   const row = page.locator("tbody tr", { hasText: "€412.00" });
   await expect(row).toContainText("Waiting for approval");
   await row.getByRole("button", { name: "Approve" }).click();
+  // Confirmation step before anything is sent.
+  await expect(page.getByRole("alertdialog")).toContainText("Approve €412.00 to Balkan Snack Distribution?");
+  await page.getByRole("button", { name: "Approve and send" }).click();
   await expect(page.getByText(/approved/i).filter({ hasText: "PO-" }).first()).toBeVisible();
   await expect(row).toContainText("Approved");
 

@@ -55,12 +55,15 @@ export const pastOrders: PurchaseOrder[] = [
     ["SOF-OFF-01", "SOF-OFF-02", "SOF-UNI-01", "SOF-HOS-01", "SOF-HOS-02"],
     "Lectures started on 1 October and Sofia University sales tripled, so I stocked two weeks of drinks while the warehouse has room.",
   ),
-  order(
-    "PO-1036", SUPPLIERS.snacks, "2026-10-05T19:04:09Z", "2026-10-07", "rejected",
-    [["choc-wafer", 240], ["biscuits", 120], ["crackers", 120]],
-    ["SOF-HOS-01", "SOF-HOS-02"],
-    "Suggested a bigger sweets order for the hospitals. Rejected by the operator: the storage room is being renovated this week.",
-  ),
+  {
+    ...order(
+      "PO-1036", SUPPLIERS.snacks, "2026-10-05T19:04:09Z", "2026-10-07", "rejected",
+      [["choc-wafer", 240], ["biscuits", 120], ["crackers", 120]],
+      ["SOF-HOS-01", "SOF-HOS-02"],
+      "Suggested a bigger sweets order for the hospitals. Rejected by the operator: the storage room is being renovated this week.",
+    ),
+    rejectionReasons: ["The operator rejected it: the hospitals' storage room is being renovated this week"],
+  },
   order(
     "PO-1035", SUPPLIERS.fresh, "2026-10-05T19:02:44Z", "2026-10-06", "sent_automatically",
     [["sandwich-chicken", 24], ["banitsa", 20], ["yogurt-fruit", 16]],
@@ -86,7 +89,7 @@ export function tonightsOrders(): PurchaseOrder[] {
         ["SOF-GYM-01", "SOF-GYM-05", "SOF-HOS-01"],
         "First drinks order of the night. The guardrail blocked it; I retried once with 240 water (PO-1043).",
       ),
-      rejectionReasons: ["600 × Devin water 0.5 l is above the warehouse capacity of 500"],
+      rejectionReasons: ["Guardrail: 600 × Devin water 0.5 l is above the warehouse capacity of 500"],
     },
     order(
       "PO-1043", SUPPLIERS.drinks, created, "2026-10-11", "sent_automatically",
