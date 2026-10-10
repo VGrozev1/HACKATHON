@@ -114,3 +114,27 @@ export interface InvestorStatement {
   payout: number;
   lines: { label: string; amount: number }[];
 }
+
+// ─── Owner portal ────────────────────────────────────────────────────────────
+
+export interface ProfitWeek {
+  weekStart: string; // Monday, "YYYY-MM-DD"
+  revenue: number;
+  costs: number;
+  profit: number;
+}
+
+export type SuggestionKind = "price" | "swap" | "restock" | "service";
+export type SuggestionStatus = "open" | "accepted" | "dismissed";
+
+/** Something the agent recommends to a machine's owner. Never applied without their OK. */
+export interface AgentSuggestion {
+  id: string;
+  machineId: string;
+  kind: SuggestionKind;
+  title: string; // "Raise Devin water to €1.40"
+  reason: string; // why, in plain language
+  impactPerMonth: number; // expected extra profit, €
+  confidence: "high" | "medium" | "low";
+  status: SuggestionStatus;
+}

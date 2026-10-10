@@ -16,6 +16,7 @@ const STEPS = [
   { href: "/orders", label: "Orders", hint: "Approve the €412 Balkan Snack Distribution order" },
   { href: "/simulation", label: "Simulation", hint: "Fast-forward a week: the one number" },
   { href: "/investor/SOF-GYM-01", label: "Investor view", hint: "Statement and payout A / B / C" },
+  { href: "/owner/SOF-GYM-01", label: "Owner portal (optional)", hint: "Profit, health; accept an AI suggestion" },
 ];
 
 function isTypingTarget(el: EventTarget | null) {
@@ -67,7 +68,7 @@ export function DemoScript() {
             <ActiveStepList onPick={() => setOpen(false)} />
           </Suspense>
           <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
-            Press <Kbd>1</Kbd>–<Kbd>6</Kbd> to jump, <Kbd>?</Kbd> to toggle this panel.
+            Press <Kbd>1</Kbd>–<Kbd>{STEPS.length}</Kbd> to jump, <Kbd>?</Kbd> to toggle this panel.
           </p>
         </div>
       )}

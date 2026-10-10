@@ -71,3 +71,26 @@ test("demo path: fleet → machine → run night → approve → simulation → 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test("owner portal: health, profit and accepting an agent suggestion", async ({ page }) => {
+  await page.goto("/owner/SOF-GYM-01");
+  await expect(page.getByRole("heading", { name: "My machine" })).toBeVisible();
+  await expect(page.getByText("Needs attention")).toBeVisible();
+  await expect(page.getByText("Profit, last 4 weeks")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sales and profit by week" })).toBeVisible();
+  await expect(page.getByText("Suggestions from the agent")).toBeVisible();
+
+  await page.getByRole("button", { name: "Accept" }).first().click();
+  await expect(page.getByText("Suggestion accepted")).toBeVisible();
+  await expect(page.getByText("Accepted: applies from tomorrow night")).toBeVisible();
+  await page.getByRole("button", { name: "Dismiss" }).first().click();
+  await expect(page.getByText(/Dismissed: /)).toBeVisible();
+
+  // An offline machine leads with the repair suggestion.
+  await page.getByLabel("Viewing as owner of").selectOption("SOF-OFF-02");
+  await expect(page).toHaveURL(/\/owner\/SOF-OFF-02$/);
+  await expect(page.getByText("Book a technician for the card reader")).toBeVisible();
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});

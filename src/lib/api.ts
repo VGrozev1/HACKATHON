@@ -9,6 +9,9 @@
 
 import type * as Contract from "@/lib/api-types";
 import type {
+  AgentSuggestion,
+  ProfitWeek,
+  SuggestionStatus,
   AgentRun,
   AgentStep,
   AgentStepType,
@@ -30,6 +33,7 @@ import { forecastFor, salesFor } from "@/mocks/ui/sales";
 import { pastOrders, tonightsOrders } from "@/mocks/ui/orders";
 import { agentScript, agentSummary, tonightsRoute } from "@/mocks/ui/agent";
 import { benchmarkResult, investorStatementFor } from "@/mocks/ui/investor";
+import { profitWeeksFor, suggestionsFor } from "@/mocks/ui/owner";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -454,4 +458,29 @@ export function getInvestorStatement(machineId: string, model: "A" | "B" | "C"):
       return investorStatementFor(machineId, model);
     },
   );
+}
+
+// ─── Owner portal ────────────────────────────────────────────────────────────
+// Not in api.md yet: needs GET /api/machines/:id/profit, GET /api/machines/:id/suggestions
+// and POST /api/suggestions/:id (Todor / Viktor). Until then both modes use the mocks.
+
+const suggestionStatus = new Map<string, SuggestionStatus>();
+
+/** Weekly revenue, costs and profit for one machine, last 8 weeks. */
+export async function getProfitHistory(machineId: string): Promise<ProfitWeek[]> {
+  await latency();
+  if (!machineSeedById.has(machineId)) throw new Error(`Machine ${machineId} not found`);
+  return profitWeeksFor(machineId);
+}
+
+/** What the agent suggests to this machine's owner: prices, swaps, visits, repairs. */
+export async function getSuggestions(machineId: string): Promise<AgentSuggestion[]> {
+  await latency();
+  return suggestionsFor(machineId).map((s) => ({ ...s, status: suggestionStatus.get(s.id) ?? s.status }));
+}
+
+/** The owner accepts or dismisses a suggestion; accepted ones go to the operator and the agent. */
+export async function respondToSuggestion(id: string, status: Exclude<SuggestionStatus, "open">): Promise<void> {
+  await sleep(500);
+  suggestionStatus.set(id, status);
 }

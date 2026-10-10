@@ -15,6 +15,7 @@ import {
   MoonStar,
   PanelLeftClose,
   PanelLeftOpen,
+  Store,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DEMO_NOW, formatDate } from "@/lib/format";
@@ -26,7 +27,8 @@ const NAV = [
   { href: "/run-night", label: "Run night", icon: MoonStar, match: (p: string) => p.startsWith("/run-night") },
   { href: "/orders", label: "Orders", icon: ClipboardList, match: (p: string) => p.startsWith("/orders") },
   { href: "/simulation", label: "Simulation", icon: FastForward, match: (p: string) => p.startsWith("/simulation") },
-  { href: "/investor", label: "Investor", icon: Landmark, match: (p: string) => p.startsWith("/investor") },
+  { href: "/investor/SOF-GYM-01", label: "Investor", icon: Landmark, match: (p: string) => p.startsWith("/investor") },
+  { href: "/owner/SOF-GYM-01", label: "My machine", icon: Store, match: (p: string) => p.startsWith("/owner") },
 ];
 
 function ActiveNav({ collapsed }: { collapsed: boolean }) {

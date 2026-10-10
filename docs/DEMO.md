@@ -26,6 +26,7 @@ The in-app **Demo script** button (bottom-right) shows the same steps. Keys **1�
 | 4 | `4` | Orders | Click **Approve** on the €412 Balkan Snack Distribution row (or approve in Telegram on the phone) | "Small orders go out automatically. Big ones wait for a human: one tap, in Telegram or here. The limit is enforced in code, not just in the prompt." | 30 s |
 | 5 | `5` | Simulation | Press **⏩ Fast-forward a week** | "Same demand, two strategies: our agent against a fixed weekly order. After a week: **86% fewer stock-outs** and 73% less waste." Pause on the number. | 40 s |
 | 6 | `6` | Investor | Switch payout **A / B / C** | "Machines are often owned by investors. They get a clean monthly statement, under whichever payout model they signed." | 20 s |
+| 7 | `7` | Owner portal (optional, if time allows) | **Accept** one suggestion | "And the owner sees their own machine: is it working, what it earns, and what the agent suggests: a price, a product swap, an extra visit. Nothing changes until they accept." | 30 s |
 
 Close: "Ordering is the hidden labour in vending. We turned it into one click, with a human in the loop for the big decisions."
 

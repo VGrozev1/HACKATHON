@@ -142,3 +142,36 @@ export function DailyStockOutsChart({
     </ResponsiveContainer>
   );
 }
+
+export function ProfitWeeksChart({
+  data,
+  height = 320,
+}: {
+  data: { weekStart: string; revenue: number; costs: number; profit: number }[];
+  height?: number;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} margin={{ top: 24, right: 8, bottom: 0, left: 0 }} barGap={6} barCategoryGap="24%">
+        <CartesianGrid vertical={false} stroke="var(--border)" />
+        <XAxis dataKey="weekStart" tickFormatter={formatShortDate} tick={AXIS} tickLine={false} axisLine={false} />
+        <YAxis tickFormatter={(v: number) => formatEURRound(v)} tick={AXIS} tickLine={false} axisLine={false} width={64} />
+        <Tooltip
+          contentStyle={TOOLTIP_STYLE}
+          cursor={{ fill: "var(--muted)" }}
+          labelFormatter={(d) => `Week of ${formatDate(String(d))}`}
+          formatter={(value, name) => [formatEUR(Number(value)), name]}
+        />
+        <Legend
+          itemSorter={null}
+          verticalAlign="top"
+          align="right"
+          height={32}
+          formatter={(v) => <span style={{ color: "var(--foreground)", fontSize: 15 }}>{v}</span>}
+        />
+        <Bar dataKey="revenue" name="Sales" fill={GREY} radius={[6, 6, 0, 0]} />
+        <Bar dataKey="profit" name="Profit" fill={BRAND} radius={[6, 6, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
