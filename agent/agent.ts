@@ -8,6 +8,7 @@ import {
   runTool,
   purchaseOrders,
   suggestions,
+  getSimToday,
   type PurchaseOrder,
   type Suggestion,
 } from "./tools.ts";
@@ -172,7 +173,10 @@ async function saveRun(run: RunResult): Promise<string> {
 
 // When this file is run directly (not imported), do tonight's run.
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const tonight = new Date().toISOString().slice(0, 10);
+  // The simulated day (SimState.today), not the real calendar date — they
+  // can drift apart once fast-forward has moved the sim clock on, and the
+  // agent's own forecast/weather/holiday tools all reason in sim-day terms.
+  const tonight = await getSimToday();
 
   const run = await runNight(tonight, (step) => {
     console.log(
