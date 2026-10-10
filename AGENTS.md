@@ -59,7 +59,7 @@ Next.js 16 App Router + TypeScript, Prisma 7 (with `@prisma/adapter-pg`) on Supa
 
 ### Safety
 
-- The Supabase MCP in `.mcp.json` is scoped to the dev project. Never point any tool at another Supabase project; the same account holds unrelated production data.
+- The Supabase MCP in `.mcp.json` and `.cursor/mcp.json` is scoped to the dev project. Never point any tool at another Supabase project; the same account holds unrelated production data.
 - Never commit `.env` or paste keys into chat; `.env.example` lists every variable.
 - Let Vercel deploy previews freely; promotion to production is done by a person.
 

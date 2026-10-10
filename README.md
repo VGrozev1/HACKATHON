@@ -59,9 +59,24 @@ These are created by hand once. The person in the second column creates the acco
 
 ## MCP servers for your AI editor
 
-`.mcp.json` in the repo lists the build servers from the plan: Supabase, GitHub, Vercel, Context7, shadcn and Playwright. Claude Code picks them up when you open the project. Each server asks you to sign in with your own account the first time. In Cursor, copy the same entries into Settings → MCP.
+The repo ships the config: `.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor. Pull `main`, open the project, approve the servers when asked, then sign in to each one: in Claude Code run `/mcp`, pick a server and choose Authenticate; in Cursor use Settings → MCP. Every sign-in uses **your own** account.
 
-**Safety rule:** point the Supabase MCP only at the **dev** project. It can run any SQL. Let Vercel deploy previews freely, but promote to production yourselves. Keep keys in `.env`, never in chat or Git.
+| Server | What the AI does with it | Needs |
+| --- | --- | --- |
+| Supabase | Schema, migrations, SQL, logs on the dev database | An invite to the Supabase org (see below) |
+| Vercel | Deploys, env vars, build and runtime logs | Access to the Vercel project (see below) |
+| GitHub | Issues, branches, PRs, reviews | Your GitHub account (collaborator on the repo) |
+| Context7 | Current docs for Next.js, Prisma, grammY, the Claude API | Nothing |
+| shadcn | Finds and installs UI components | Nothing |
+| Playwright | Clicks through the app in a real browser | Nothing |
+| Next.js devtools | Reads the running dev server: errors, routes, logs, compile issues | `npm run dev` running |
+| Prisma | Migration status, `migrate dev`, Studio | `.env` with the database strings |
+
+**Supabase access.** The dev project lives in Todor's Supabase org, next to unrelated projects. The MCP config is locked to `vending-agent-dev`, but an org invite still lets people see the others in the dashboard. Only invite whoever needs it (Todor owns the database, so usually nobody else does). Everyone else uses the database through Prisma and `.env`.
+
+**Vercel access.** Vercel's free Hobby plan has no team members, so only the project owner can use the Vercel MCP. Either the owner handles deploys and shares logs, or they create a Vercel team (Pro, 14-day free trial) and invite the others.
+
+**Safety rule:** point the Supabase MCP only at the **dev** project; it can run any SQL. Let Vercel deploy previews freely, but promote to production yourselves. Keep keys in `.env`, never in chat or Git.
 
 ## Project layout
 
