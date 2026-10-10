@@ -18,7 +18,8 @@
     "sim:forecast-check": "tsx scripts/forecast-check.ts",
     "sim:benchmark": "tsx scripts/benchmark-check.ts",
     "demo:check": "playwright test",
-    "demo:record": "playwright test"
+    "demo:record": "playwright test",
+    "db:sync-catalog": "tsx scripts/sync-catalog.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
