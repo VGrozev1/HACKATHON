@@ -111,4 +111,8 @@ Demand is a pure function of the day, so reruns and both benchmark strategies se
 - [x] Vercel project `vending-agent` (Todor's account, region fra1): https://vending-agent-pi.vercel.app. Deployed from the CLI (`vercel deploy --prod`); not git-linked, because the repo is under Viktor's GitHub
 - [x] Vercel environment variables set (including `NEXT_PUBLIC_USE_MOCK=false`)
 - **Deploying:** Vercel's free Hobby plan only deploys when the latest commit on `main` was made by Todor (the account owner); otherwise the deploy shows as BLOCKED. So Todor deploys with `vercel deploy --prod` from his machine right after one of his own commits lands on `main`.
-- [ ] Claude API key, Resend key, demo Gmail inbox
+- [x] Claude API key, Resend key, demo Gmail inbox (all set on Vercel)
+- [x] Agent API for Viktor's tools (catalog, warehouse, stock, forecast?days, orders, visits, visit-done, suggestions, weather, holidays, today, per-product sales); see api.md "Agent API"
+- [x] Agent tools on the real API: list_machines, get_stock, forecast, check_alerts, plan_route, weather, holidays, today
+- [ ] Agent tools still to move: create_purchase_order, guardrails catalog/warehouse, notify_stocker (save visits), create_suggestion, misses.ts actuals, bot.ts buttons
+- [ ] Run night on Vercel: run the agent inside the request and store its steps in the database (today it spawns `node agent.ts`, which only works locally)
