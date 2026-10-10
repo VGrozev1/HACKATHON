@@ -13,7 +13,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "sim:report": "tsx scripts/sim-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

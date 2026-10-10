@@ -37,8 +37,23 @@ Next.js 16 App Router + TypeScript, Prisma 7 (with `@prisma/adapter-pg`) on Supa
 - **Live database:** Supabase project `vending-agent-dev` (ref `wswjqtipgwtjdsnxqvcu`, eu-central-1). The `init` migration is applied. It's a dev project only; nothing real lives there.
 - **Changing the schema:** edit `schema.prisma`, run `npm run db:migrate -- --name <change>`, commit the migration folder, and tell the team (it changes the API). Never edit an applied migration.
 - **Client:** import `db` from `src/lib/db.ts` only; never create another `PrismaClient`. The client is generated into `src/generated/prisma` (gitignored; `npm install` regenerates it).
+- **Timestamps** are stored as `timestamp` (no time zone) holding UTC. In raw SQL, convert to Sofia time with `("occurredAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Sofia'`; a single `AT TIME ZONE` shifts the wrong way.
+- **Demo data:** `npm run db:seed` wipes and reseeds the dev database (same data every time). `npm run sim:report` prints the simulation numbers without touching the database.
 - **RLS** is on for every table with no policies. That blocks Supabase's public REST API on purpose; Prisma connects as the owner and is unaffected. New tables need `ALTER TABLE "X" ENABLE ROW LEVEL SECURITY;` added to their migration.
 - **Prisma 7 differs from older versions:** the connection URL lives in `prisma.config.ts`, not the schema; the generator is `prisma-client` with an explicit output. The skills in `.claude/skills/prisma-*` cover the details.
+
+### Simulator (`src/lib/sim/`)
+
+| File | What |
+| --- | --- |
+| `fleet.ts` | A2: 3 suppliers, 29 products, 20 machines in Sofia, slot layouts per location type, investors |
+| `calendar.ts` | Days, Sofia time, public holidays, weather. **Shared with the agent:** B4 reads holidays and `weatherOn(day)` from here, the same world the demand comes from |
+| `demand.ts` | A3: hourly, weekday, holiday, season and weather effects; `expectedSlotDemand` is the true mean that the A5 forecast estimates |
+| `generator.ts` | A3: `generateDay(day)` gives purchase attempts in the S4 sale event format, deterministic per day |
+| `stock.ts` | In-memory stock batches: oldest sold first, expired items unsellable until pulled (waste) |
+| `history.ts` | Replays days under the fixed refill schedule. Used by the seed; also the "fixed weekly order" baseline for A8 |
+
+Demand is a pure function of the day, so reruns and both benchmark strategies see identical customers. `SIM_TODAY` (default 2026-10-10) is the last day of history; fast-forward continues from there.
 
 ### API contract
 
@@ -73,6 +88,7 @@ Next.js 16 App Router + TypeScript, Prisma 7 (with `@prisma/adapter-pg`) on Supa
 - [x] Schema, initial migration applied to Supabase
 - [x] API contract + mock endpoints, sale event format
 - [x] Telegram bot created; token and chat ids in Todor's `.env`
-- [ ] Database password reset + connection strings shared with the team; `npx prisma migrate resolve --applied 20261010000000_init` run once
+- [x] Database connected; init migration resolved; demo data seeded (A1–A3)
+- [ ] Connection strings shared with Viktor and Kalin
 - [ ] Vercel project (Viktor imports the repo, since it's under his GitHub account)
 - [ ] Claude API key, Resend key, demo Gmail inbox
