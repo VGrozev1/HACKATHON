@@ -2,6 +2,8 @@
 
 The live demo for the judges: about 4 minutes, six screens, one number. Kalin presents and clicks; Viktor has the phone with Telegram; Todor watches the laptop's terminal and the demo inbox.
 
+Pitch deck (C8): https://claude.ai/artifact/16dZFBjUiRPNdYMuUx7hac (7 slides; the demo slide hands over to the app). Kalin shares it from its Share menu.
+
 The in-app **Demo script** button (bottom-right) shows the same steps. Keys **1–6** jump straight to each screen; **?** opens the panel.
 
 ## Before going on stage
