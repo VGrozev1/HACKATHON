@@ -13,6 +13,7 @@
 // The agent (B4) adjusts this for weather and holidays.
 
 import { db } from "@/lib/db";
+import { Prisma } from "@/generated/prisma/client";
 import type { MachineForecast, SlotForecast } from "@/lib/api-types";
 import { addDays, dayOfWeek, dayRange, sofiaTime, type Day } from "@/lib/sim/calendar";
 
@@ -46,15 +47,17 @@ export async function computeBaseline(asOf: Day, machineIds?: string[]): Promise
   const from = sofiaTime(firstDay, 0);
   const to = sofiaTime(addDays(asOf, 1), 0);
   const machineFilter = machineIds ? { machineId: { in: machineIds } } : {};
+  // Same filter in SQL; the "no filter" branch keeps one prepared statement for the fleet.
+  const onlyMachines = machineIds ? Prisma.sql`AND "machineId" IN (${Prisma.join(machineIds)})` : Prisma.empty;
 
   const [slotDays, hourlyRows, stockOuts, slots] = await Promise.all([
     db.$queryRaw<{ slotId: string; day: Date; n: number }[]>`
       SELECT "slotId", ((("occurredAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Sofia')::date) AS day, COUNT(*)::int AS n
-      FROM "SaleEvent" WHERE "occurredAt" >= ${from} AND "occurredAt" < ${to}
+      FROM "SaleEvent" WHERE "occurredAt" >= ${from} AND "occurredAt" < ${to} ${onlyMachines}
       GROUP BY 1, 2`,
     db.$queryRaw<{ machineId: string; hour: number; n: number }[]>`
       SELECT "machineId", EXTRACT(HOUR FROM ("occurredAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Sofia')::int AS hour, COUNT(*)::int AS n
-      FROM "SaleEvent" WHERE "occurredAt" >= ${from} AND "occurredAt" < ${to}
+      FROM "SaleEvent" WHERE "occurredAt" >= ${from} AND "occurredAt" < ${to} ${onlyMachines}
       GROUP BY 1, 2`,
     db.stockOut.findMany({
       where: { ...machineFilter, startedAt: { lt: to }, OR: [{ endedAt: null }, { endedAt: { gt: from } }] },

@@ -7,7 +7,13 @@ import { PrismaClient } from "@/generated/prisma/client";
 const globalForDb = globalThis as unknown as { db?: PrismaClient };
 
 function createClient() {
-  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+  const adapter = new PrismaPg({
+    connectionString: process.env.DATABASE_URL,
+    // Opening a connection to the Supabase pooler costs ~1 s (TLS + auth), and pg
+    // closes idle ones after 10 s by default, so a dashboard paid it on most clicks.
+    idleTimeoutMillis: 5 * 60_000,
+    max: 10,
+  });
   return new PrismaClient({ adapter });
 }
 

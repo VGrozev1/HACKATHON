@@ -13,9 +13,9 @@ import type {
   Visit,
   LoadItem,
 } from "@/lib/api-types";
-import { addDays, dayOfWeek, dayRange, sofiaTime, type Day } from "@/lib/sim/calendar";
+import { addDays, dayRange, sofiaTime, type Day } from "@/lib/sim/calendar";
+import { Prisma } from "@/generated/prisma/client";
 import { cashMismatches } from "./cash";
-import { computeBaseline } from "./forecast";
 import { getSimToday, simNight } from "./sim-clock";
 import { loadStock, machineSlotStock, stockPercentByMachine } from "./stock";
 import { sellable } from "@/lib/sim/stock";
@@ -38,23 +38,33 @@ async function salesOnDay(day: Day) {
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
 
+/** Per machine: average units sold on the same weekday over the previous 4 weeks. */
+async function usualSalesOn(day: Day): Promise<Map<string, number>> {
+  const starts = [1, 2, 3, 4].map((w) => addDays(day, -7 * w));
+  const rows = await db.$queryRaw<{ machineId: string; n: number }[]>`
+    SELECT "machineId", COUNT(*)::int AS n FROM "SaleEvent"
+    WHERE ((("occurredAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Sofia')::date) IN (${Prisma.join(starts.map((d) => new Date(`${d}T00:00:00Z`)))})
+    GROUP BY 1`;
+  return new Map(rows.map((r) => [r.machineId, r.n / starts.length]));
+}
+
 /**
  * Data-driven "what's wrong" checks for every machine. Viktor's B8 can add
  * likely causes on top; these are the facts.
  */
-async function fleetAlerts(today: Day): Promise<Map<string, Alert[]>> {
+async function fleetAlerts(today: Day, machineIds?: string[]): Promise<Map<string, Alert[]>> {
   const night = simNight(today);
   const soon = new Date(night.getTime() + 24 * 3600 * 1000);
-  const [machines, slots, stock, todaySales, baseline, cash] = await Promise.all([
-    db.machine.findMany(),
-    db.slot.findMany({ include: { product: true }, orderBy: { code: "asc" } }),
-    loadStock(),
+  const where = machineIds ? { machineId: { in: machineIds } } : undefined;
+  const [machines, slots, stock, todaySales, usualToday, cash] = await Promise.all([
+    db.machine.findMany({ where: machineIds ? { id: { in: machineIds } } : undefined }),
+    db.slot.findMany({ where, include: { product: true }, orderBy: { code: "asc" } }),
+    loadStock(machineIds),
     salesOnDay(today),
-    computeBaseline(addDays(today, -1)),
+    usualSalesOn(today),
     cashMismatches(),
   ]);
   const alerts = new Map<string, Alert[]>(machines.map((m) => [m.id, []]));
-  const usualToday = new Map<string, number>();
 
   for (const slot of slots) {
     const list = alerts.get(slot.machineId)!;
@@ -68,8 +78,6 @@ async function fleetAlerts(today: Day): Promise<Map<string, Alert[]>> {
     if (expiring > 0) {
       list.push({ kind: "EXPIRING", message: `${expiring} × ${slot.product.name} in ${slot.code} expire within 24 h` });
     }
-    const perDow = baseline.get(slot.id);
-    if (perDow) usualToday.set(slot.machineId, (usualToday.get(slot.machineId) ?? 0) + perDow[dayOfWeek(today)]);
   }
 
   for (const m of machines) {
@@ -123,7 +131,7 @@ export async function getMachine(id: string): Promise<MachineDetail | null> {
   const [slots, sales, alerts, lastVisit, nextVisit] = await Promise.all([
     machineSlotStock(id, night),
     salesOnDay(today),
-    fleetAlerts(today),
+    fleetAlerts(today, [id]),
     db.visit.findFirst({ where: { machineId: id, status: "DONE" }, orderBy: { doneAt: "desc" } }),
     db.visit.findFirst({ where: { machineId: id, status: { in: ["PLANNED", "SENT"] } }, orderBy: { date: "asc" } }),
   ]);
