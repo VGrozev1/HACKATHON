@@ -8,6 +8,10 @@ import { requireInvestor } from "@/lib/auth";
 // or Next's Cache Components "instant navigation" validation errors out
 // for a signed-out visitor (or one viewing someone else's machine) instead
 // of just redirecting them.
+// The sign-in check reads the session cookie before rendering, so this route blocks on
+// the server instead of serving a prerendered shell (lets the production build accept it).
+export const instant = false;
+
 export default async function OwnerPage({ params }: PageProps<"/owner/[machineId]">) {
   const { machineId } = await params;
   const investor = await requireInvestor(`/owner/${machineId}`);
