@@ -36,35 +36,52 @@ export interface ProductDef {
   appeal: Partial<Record<LocationType, number>>;
 }
 
+// `cost` below is checked against Metro Bulgaria's cash-and-carry listings
+// (shop.metro.bg) by product name, Oct 2026 — it's a wholesale cash-and-carry
+// chain, so its per-unit price (from multi-packs) is the right comparison for
+// our `cost` field, not `price` (what the vending customer pays, a separate
+// business decision `price` already reflects — left alone here).
+// Directly verified per-unit from a Metro multi-pack listing:
+//   Devin water 0.5 l: 12 × 0.5 l for €3.65 → €0.30/unit
+//   Red Bull 250 ml: 6 × 250 ml for €7.68 → €1.28/unit
+//   Monster Energy 500 ml: 12 × 500 ml for €14.83 → €1.24/unit
+//   Chocolate wafer 50 g ("Тунквана вафла"): 25 × 50 g for €9.35 → €0.37/unit
+// Everything else in the same category/supplier is nudged from its old value
+// toward the same real-world range (no exact Metro SKU match for each one,
+// e.g. there's no single "Fanta Orange 330 ml" multi-pack listing, but
+// Coca-Cola-brand sodas at Metro run noticeably higher than this file
+// previously assumed). Fresh items (sandwiches, salads, banitsa) are made
+// to order by a caterer, not a Metro SKU with a brochure price — left as-is.
 export const PRODUCTS: ProductDef[] = [
   // Drinks: cold drinks react to the weather.
-  { id: "water-500", name: "Devin water 0.5 l", category: "drink", cost: 0.32, price: 1.2, shelfLifeDays: 365, supplierId: "sup-drinks", appeal: { GYM: 3.2, OFFICE: 1.6, HOSPITAL: 2.4, UNIVERSITY: 1.5 } },
-  { id: "water-sparkling-500", name: "Bankya sparkling 0.5 l", category: "drink", cost: 0.35, price: 1.3, shelfLifeDays: 365, supplierId: "sup-drinks", appeal: { GYM: 0.8, OFFICE: 1.1, HOSPITAL: 0.9, UNIVERSITY: 0.6 } },
-  { id: "cola-330", name: "Coca-Cola 330 ml", category: "drink", cost: 0.55, price: 1.8, shelfLifeDays: 270, supplierId: "sup-drinks", appeal: { GYM: 0.4, OFFICE: 1.4, HOSPITAL: 1.2, UNIVERSITY: 1.9 } },
-  { id: "cola-zero-330", name: "Coca-Cola Zero 330 ml", category: "drink", cost: 0.55, price: 1.8, shelfLifeDays: 270, supplierId: "sup-drinks", appeal: { GYM: 1.2, OFFICE: 1.3, HOSPITAL: 0.8, UNIVERSITY: 1.1 } },
-  { id: "fanta-330", name: "Fanta Orange 330 ml", category: "drink", cost: 0.5, price: 1.7, shelfLifeDays: 270, supplierId: "sup-drinks", appeal: { OFFICE: 0.7, HOSPITAL: 0.8, UNIVERSITY: 1.2 } },
-  { id: "icetea-500", name: "Peach ice tea 0.5 l", category: "drink", cost: 0.6, price: 2.0, shelfLifeDays: 240, supplierId: "sup-drinks", appeal: { GYM: 0.9, OFFICE: 1.2, HOSPITAL: 1.0, UNIVERSITY: 1.3 } },
-  { id: "juice-orange-330", name: "Orange juice 330 ml", category: "drink", cost: 0.7, price: 2.2, shelfLifeDays: 180, supplierId: "sup-drinks", appeal: { OFFICE: 0.8, HOSPITAL: 1.4, UNIVERSITY: 0.6 } },
-  { id: "isotonic-500", name: "Isotonic drink 0.5 l", category: "drink", cost: 0.8, price: 2.5, shelfLifeDays: 300, supplierId: "sup-drinks", appeal: { GYM: 2.2, OFFICE: 0.3, UNIVERSITY: 0.4 } },
-  { id: "redbull-250", name: "Red Bull 250 ml", category: "energy", cost: 1.05, price: 2.9, shelfLifeDays: 540, supplierId: "sup-drinks", appeal: { GYM: 1.8, OFFICE: 1.0, HOSPITAL: 0.7, UNIVERSITY: 2.2 } },
-  { id: "monster-500", name: "Monster Energy 500 ml", category: "energy", cost: 1.15, price: 3.2, shelfLifeDays: 540, supplierId: "sup-drinks", appeal: { GYM: 1.3, OFFICE: 0.6, UNIVERSITY: 1.6 } },
-  { id: "coffee-cold-250", name: "Cold brew coffee 250 ml", category: "coffee", cost: 0.9, price: 2.6, shelfLifeDays: 180, supplierId: "sup-drinks", appeal: { GYM: 0.6, OFFICE: 1.8, HOSPITAL: 1.3, UNIVERSITY: 1.2 } },
+  { id: "water-500", name: "Devin water 0.5 l", category: "drink", cost: 0.3, price: 1.2, shelfLifeDays: 365, supplierId: "sup-drinks", appeal: { GYM: 3.2, OFFICE: 1.6, HOSPITAL: 2.4, UNIVERSITY: 1.5 } },
+  { id: "water-sparkling-500", name: "Bankya sparkling 0.5 l", category: "drink", cost: 0.33, price: 1.3, shelfLifeDays: 365, supplierId: "sup-drinks", appeal: { GYM: 0.8, OFFICE: 1.1, HOSPITAL: 0.9, UNIVERSITY: 0.6 } },
+  { id: "cola-330", name: "Coca-Cola 330 ml", category: "drink", cost: 0.7, price: 1.8, shelfLifeDays: 270, supplierId: "sup-drinks", appeal: { GYM: 0.4, OFFICE: 1.4, HOSPITAL: 1.2, UNIVERSITY: 1.9 } },
+  { id: "cola-zero-330", name: "Coca-Cola Zero 330 ml", category: "drink", cost: 0.7, price: 1.8, shelfLifeDays: 270, supplierId: "sup-drinks", appeal: { GYM: 1.2, OFFICE: 1.3, HOSPITAL: 0.8, UNIVERSITY: 1.1 } },
+  { id: "fanta-330", name: "Fanta Orange 330 ml", category: "drink", cost: 0.65, price: 1.7, shelfLifeDays: 270, supplierId: "sup-drinks", appeal: { OFFICE: 0.7, HOSPITAL: 0.8, UNIVERSITY: 1.2 } },
+  { id: "icetea-500", name: "Peach ice tea 0.5 l", category: "drink", cost: 0.65, price: 2.0, shelfLifeDays: 240, supplierId: "sup-drinks", appeal: { GYM: 0.9, OFFICE: 1.2, HOSPITAL: 1.0, UNIVERSITY: 1.3 } },
+  { id: "juice-orange-330", name: "Orange juice 330 ml", category: "drink", cost: 0.75, price: 2.2, shelfLifeDays: 180, supplierId: "sup-drinks", appeal: { OFFICE: 0.8, HOSPITAL: 1.4, UNIVERSITY: 0.6 } },
+  { id: "isotonic-500", name: "Isotonic drink 0.5 l", category: "drink", cost: 0.85, price: 2.5, shelfLifeDays: 300, supplierId: "sup-drinks", appeal: { GYM: 2.2, OFFICE: 0.3, UNIVERSITY: 0.4 } },
+  { id: "redbull-250", name: "Red Bull 250 ml", category: "energy", cost: 1.28, price: 2.9, shelfLifeDays: 540, supplierId: "sup-drinks", appeal: { GYM: 1.8, OFFICE: 1.0, HOSPITAL: 0.7, UNIVERSITY: 2.2 } },
+  { id: "monster-500", name: "Monster Energy 500 ml", category: "energy", cost: 1.24, price: 3.2, shelfLifeDays: 540, supplierId: "sup-drinks", appeal: { GYM: 1.3, OFFICE: 0.6, UNIVERSITY: 1.6 } },
+  { id: "coffee-cold-250", name: "Cold brew coffee 250 ml", category: "coffee", cost: 0.85, price: 2.6, shelfLifeDays: 180, supplierId: "sup-drinks", appeal: { GYM: 0.6, OFFICE: 1.8, HOSPITAL: 1.3, UNIVERSITY: 1.2 } },
 
   // Snacks: long shelf life, steady sellers.
-  { id: "protein-bar", name: "Protein bar 50 g", category: "snack", cost: 1.1, price: 3.0, shelfLifeDays: 270, supplierId: "sup-snacks", appeal: { GYM: 2.6, OFFICE: 0.6, UNIVERSITY: 0.5 } },
-  { id: "granola-bar", name: "Oat & honey granola bar", category: "snack", cost: 0.45, price: 1.5, shelfLifeDays: 240, supplierId: "sup-snacks", appeal: { GYM: 1.1, OFFICE: 0.9, HOSPITAL: 1.0, UNIVERSITY: 0.7 } },
-  { id: "nuts-mix", name: "Roasted nut mix 60 g", category: "snack", cost: 0.7, price: 2.2, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { GYM: 1.2, OFFICE: 1.0, HOSPITAL: 0.6 } },
-  { id: "chips-salt", name: "Potato chips salted 70 g", category: "snack", cost: 0.55, price: 1.8, shelfLifeDays: 210, supplierId: "sup-snacks", appeal: { OFFICE: 1.1, HOSPITAL: 0.6, UNIVERSITY: 1.8 } },
-  { id: "chips-paprika", name: "Potato chips paprika 70 g", category: "snack", cost: 0.55, price: 1.8, shelfLifeDays: 210, supplierId: "sup-snacks", appeal: { OFFICE: 0.9, UNIVERSITY: 1.6 } },
-  { id: "crackers", name: "Sesame crackers 80 g", category: "snack", cost: 0.4, price: 1.4, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { OFFICE: 0.8, HOSPITAL: 1.1, UNIVERSITY: 0.6 } },
-  { id: "rice-cakes", name: "Rice cakes with dark chocolate", category: "snack", cost: 0.5, price: 1.6, shelfLifeDays: 240, supplierId: "sup-snacks", appeal: { GYM: 0.9, OFFICE: 0.7 } },
-  { id: "choc-milk", name: "Milk chocolate bar 90 g", category: "sweet", cost: 0.6, price: 1.9, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { OFFICE: 1.3, HOSPITAL: 1.2, UNIVERSITY: 1.4 } },
-  { id: "choc-wafer", name: "Chocolate wafer 50 g", category: "sweet", cost: 0.35, price: 1.3, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { OFFICE: 1.2, HOSPITAL: 1.1, UNIVERSITY: 1.7 } },
-  { id: "choc-hazelnut", name: "Hazelnut chocolate bar 50 g", category: "sweet", cost: 0.55, price: 1.8, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { OFFICE: 1.0, UNIVERSITY: 1.1 } },
-  { id: "biscuits", name: "Butter biscuits 100 g", category: "sweet", cost: 0.4, price: 1.4, shelfLifeDays: 270, supplierId: "sup-snacks", appeal: { OFFICE: 0.7, HOSPITAL: 1.3 } },
-  { id: "croissant", name: "Cocoa croissant (packed)", category: "sweet", cost: 0.45, price: 1.6, shelfLifeDays: 60, supplierId: "sup-snacks", appeal: { OFFICE: 1.0, HOSPITAL: 1.0, UNIVERSITY: 1.5 } },
+  { id: "protein-bar", name: "Protein bar 50 g", category: "snack", cost: 1.15, price: 3.0, shelfLifeDays: 270, supplierId: "sup-snacks", appeal: { GYM: 2.6, OFFICE: 0.6, UNIVERSITY: 0.5 } },
+  { id: "granola-bar", name: "Oat & honey granola bar", category: "snack", cost: 0.48, price: 1.5, shelfLifeDays: 240, supplierId: "sup-snacks", appeal: { GYM: 1.1, OFFICE: 0.9, HOSPITAL: 1.0, UNIVERSITY: 0.7 } },
+  { id: "nuts-mix", name: "Roasted nut mix 60 g", category: "snack", cost: 0.75, price: 2.2, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { GYM: 1.2, OFFICE: 1.0, HOSPITAL: 0.6 } },
+  { id: "chips-salt", name: "Potato chips salted 70 g", category: "snack", cost: 0.6, price: 1.8, shelfLifeDays: 210, supplierId: "sup-snacks", appeal: { OFFICE: 1.1, HOSPITAL: 0.6, UNIVERSITY: 1.8 } },
+  { id: "chips-paprika", name: "Potato chips paprika 70 g", category: "snack", cost: 0.6, price: 1.8, shelfLifeDays: 210, supplierId: "sup-snacks", appeal: { OFFICE: 0.9, UNIVERSITY: 1.6 } },
+  { id: "crackers", name: "Sesame crackers 80 g", category: "snack", cost: 0.42, price: 1.4, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { OFFICE: 0.8, HOSPITAL: 1.1, UNIVERSITY: 0.6 } },
+  { id: "rice-cakes", name: "Rice cakes with dark chocolate", category: "snack", cost: 0.52, price: 1.6, shelfLifeDays: 240, supplierId: "sup-snacks", appeal: { GYM: 0.9, OFFICE: 0.7 } },
+  { id: "choc-milk", name: "Milk chocolate bar 90 g", category: "sweet", cost: 0.62, price: 1.9, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { OFFICE: 1.3, HOSPITAL: 1.2, UNIVERSITY: 1.4 } },
+  { id: "choc-wafer", name: "Chocolate wafer 50 g", category: "sweet", cost: 0.37, price: 1.3, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { OFFICE: 1.2, HOSPITAL: 1.1, UNIVERSITY: 1.7 } },
+  { id: "choc-hazelnut", name: "Hazelnut chocolate bar 50 g", category: "sweet", cost: 0.58, price: 1.8, shelfLifeDays: 300, supplierId: "sup-snacks", appeal: { OFFICE: 1.0, UNIVERSITY: 1.1 } },
+  { id: "biscuits", name: "Butter biscuits 100 g", category: "sweet", cost: 0.42, price: 1.4, shelfLifeDays: 270, supplierId: "sup-snacks", appeal: { OFFICE: 0.7, HOSPITAL: 1.3 } },
+  { id: "croissant", name: "Cocoa croissant (packed)", category: "sweet", cost: 0.47, price: 1.6, shelfLifeDays: 60, supplierId: "sup-snacks", appeal: { OFFICE: 1.0, HOSPITAL: 1.0, UNIVERSITY: 1.5 } },
 
-  // Fresh: short shelf life, where waste happens.
+  // Fresh: short shelf life, where waste happens. Made to order by a
+  // caterer, not a Metro SKU — costs left as originally set.
   { id: "sandwich-chicken", name: "Chicken sandwich", category: "fresh", cost: 1.65, price: 4.2, shelfLifeDays: 3, supplierId: "sup-fresh", appeal: { OFFICE: 1.9, HOSPITAL: 1.8, UNIVERSITY: 1.0 } },
   { id: "sandwich-ham", name: "Ham & cheese sandwich", category: "fresh", cost: 1.45, price: 3.8, shelfLifeDays: 3, supplierId: "sup-fresh", appeal: { OFFICE: 1.4, HOSPITAL: 1.5, UNIVERSITY: 1.2 } },
   { id: "wrap-veggie", name: "Veggie wrap", category: "fresh", cost: 1.55, price: 4.0, shelfLifeDays: 3, supplierId: "sup-fresh", appeal: { GYM: 0.8, OFFICE: 1.0 } },
