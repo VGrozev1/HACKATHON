@@ -1,7 +1,7 @@
 // The frontend's only data source (Kalin, C1–C7). Every screen calls these functions,
-// never the mocks directly, so switching to the real backend is a config change:
+// never the mocks directly, so switching between real and mock data is one setting:
 //
-//   NEXT_PUBLIC_USE_MOCK=false             use the real endpoints (default: mocks)
+//   NEXT_PUBLIC_USE_MOCK=true              use the built-in mocks (default: Todor's real API)
 //   NEXT_PUBLIC_API_BASE_URL=https://...   where they live (default: this app's own /api)
 //   NEXT_PUBLIC_AGENT_LIVE=true            use the real agent run for Run night (once B1 is live)
 //
@@ -37,7 +37,8 @@ import { benchmarkResult } from "@/mocks/ui/investor";
 import { mockSuggestions } from "@/mocks/ui/suggestions";
 import { profitWeeksFromSales, statementFromSales, suggestionsFrom } from "@/lib/insights";
 
-export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
+// Real API by default; any failed call falls back to the mocks (see withBackup).
+export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 /** The real agent run endpoints (Viktor, B1) are live. Until then Run night uses the scripted run. */
 export const AGENT_LIVE = !USE_MOCK && process.env.NEXT_PUBLIC_AGENT_LIVE === "true";
@@ -48,8 +49,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Mock latency, so loading skeletons are visible but never slow the demo down. */
 const latency = () => sleep(250 + Math.random() * 250);
 
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
+/** A dead API must not stall the demo: every call gives up after `timeoutMs`. */
+async function http<T>(path: string, init?: RequestInit, timeoutMs = 8000): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
+    signal: AbortSignal.timeout(timeoutMs),
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
     cache: "no-store",
@@ -281,17 +284,28 @@ class NoBackupError extends Error {
   }
 }
 
+/** After a failure, use backup data for a while instead of waiting on a dead API every call. */
+const COOLDOWN_MS = 30_000;
+let backupUntil = 0;
+
+function setUsingBackup(value: boolean) {
+  if (usingBackup === value) return;
+  usingBackup = value;
+  backupListeners.forEach((l) => l());
+}
+
 async function withBackup<T>(what: string, real: () => Promise<T>, backup: () => Promise<T>): Promise<T> {
   if (USE_MOCK) return backup();
+  if (Date.now() < backupUntil) return backup();
   try {
-    return await real();
+    const result = await real();
+    setUsingBackup(false);
+    return result;
   } catch (e) {
     if (e instanceof NoBackupError) throw e.cause;
     console.warn(`[api] ${what} failed, using backup data:`, e);
-    if (!usingBackup) {
-      usingBackup = true;
-      backupListeners.forEach((l) => l());
-    }
+    backupUntil = Date.now() + COOLDOWN_MS;
+    setUsingBackup(true);
     return backup();
   }
 }
@@ -517,7 +531,8 @@ export function fastForward(days = 7): Promise<BenchmarkResult> {
   return withBackup(
     "fastForward",
     async () => {
-      const res = await http<Contract.FastForwardResponse>(`/api/sim/fast-forward?days=${days}`, { method: "POST" });
+      // ~2–4 s per simulated day (api.md), so this call gets a long timeout.
+      const res = await http<Contract.FastForwardResponse>(`/api/sim/fast-forward?days=${days}`, { method: "POST" }, 90_000);
       const b = await http<Contract.Benchmark>("/api/benchmark").catch(() => res.benchmark);
       return fromBenchmark(b);
     },

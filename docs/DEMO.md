@@ -23,7 +23,7 @@ The in-app **Demo script** button (bottom-right) shows the same steps. Keys **1�
 | 1 | `1` | Fleet overview | Point at the KPIs, then switch **Cards → Map** and back | "20 machines across Sofia. Four are low on stock, two have food about to expire, one is offline, and one suddenly stopped selling. Today someone checks all of this by hand, every night." | 30 s |
 | 2 | `2` | Gym Lozenets | Click the **Gym Lozenets** card | "Water and Red Bull are sold out. Here are 60 days of sales, stock per slot with expiry dates, and the forecast: dashed is what we expected, solid is what happened." | 30 s |
 | 3 | `3` | Run night | Press **▶ Run tonight's agent** and let it stream | "This is what runs every night at 22:00. It reads stock, forecasts, checks the weather, and here it raises the gym's forecast by 30% for a hot weekend. It plans a 6-stop route and orders from suppliers. And here, a **guardrail**: the €412 snack order is over our €300 limit, so it can't send it on its own." Then open the **Route** and **Decisions** tabs. | 60 s |
-| 4 | `4` | Orders | Click **Approve** on the €412 Balkan Snack Distribution row (or approve in Telegram on the phone) | "Small orders go out automatically. Big ones wait for a human: one tap, in Telegram or here. The limit is enforced in code, not just in the prompt." | 30 s |
+| 4 | `4` | Orders | Click **Approve** on the €412 Balkan Snack Distribution row, then **Approve and send** (or approve in Telegram on the phone). Scroll down and **Accept** the 35°C heatwave suggestion | "Small orders go out automatically. Big ones wait for a human: one tap, in Telegram or here. The limit is enforced in code, not just in the prompt. The agent also suggests things beyond tonight, like doubling water for a heatwave; accepting only records the decision, it never changes prices or stock by itself." | 45 s |
 | 5 | `5` | Simulation | Press **⏩ Fast-forward a week** | "Same demand, two strategies: our agent against a fixed weekly order. After a week: **86% fewer stock-outs** and 73% less waste." Pause on the number. | 40 s |
 | 6 | `6` | Investor | Switch payout **A / B / C** | "Machines are often owned by investors. They get a clean monthly statement, under whichever payout model they signed." | 20 s |
 | 7 | `7` | Owner portal (optional, if time allows) | **Accept** one suggestion | "And the owner sees their own machine: is it working, what it earns, and what the agent suggests: a price, a product swap, an extra visit. Nothing changes until they accept." | 30 s |
@@ -46,3 +46,36 @@ Close: "Ordering is the hidden labour in vending. We turned it into one click, w
 
 - `npm run demo:check` runs the click path above in a real browser (Playwright, `e2e/demo.spec.ts`) and fails if any step is broken. Run it after every merge and before going on stage.
 - Rehearse out loud at least three times; the whole run must fit with a minute to spare.
+
+## Run it locally
+
+```bash
+npm install
+npm run dev
+```
+
+Open http://localhost:3000. The app uses Todor's real API by default. Without the database settings in `.env` (ask Todor), every call fails fast and the screens show the built-in backup data with an amber **Using backup data** badge. `NEXT_PUBLIC_USE_MOCK=true` in `.env` forces the backup data on purpose; `NEXT_PUBLIC_AGENT_LIVE=true` switches Run night and the suggestions to Viktor's agent once its endpoints are live.
+
+Check the whole demo in a browser (starts the dev server if it isn't running):
+
+```bash
+npm run demo:check
+```
+
+## Deploy a preview to Vercel
+
+The Vercel project `vending-agent` is on Todor's account and isn't linked to Git, so Todor deploys, or invites you to the project first. Then, from the repo root:
+
+```bash
+npx vercel login
+npx vercel link --project vending-agent
+npx vercel deploy
+```
+
+`vercel deploy` prints a preview URL. The preview needs the same environment variables as production (Vercel → Settings → Environment Variables, ticked for **Preview**). Check the preview with the same test:
+
+```bash
+DEMO_URL=https://<preview-url> npm run demo:check
+```
+
+Production (`npx vercel deploy --prod`) is promoted by a person, never by an agent.
