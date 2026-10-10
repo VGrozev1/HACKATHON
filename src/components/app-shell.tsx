@@ -28,7 +28,7 @@ const NAV = [
   { href: "/orders", label: "Orders", icon: ClipboardList, match: (p: string) => p.startsWith("/orders") },
   { href: "/simulation", label: "Simulation", icon: FastForward, match: (p: string) => p.startsWith("/simulation") },
   { href: "/investor/SOF-GYM-01", label: "Investor", icon: Landmark, match: (p: string) => p.startsWith("/investor") },
-  { href: "/owner/SOF-GYM-01", label: "My machine", icon: Store, match: (p: string) => p.startsWith("/owner") },
+  { href: "/owner", label: "Investor portal", icon: Store, match: (p: string) => p.startsWith("/owner") },
 ];
 
 function ActiveNav({ collapsed }: { collapsed: boolean }) {

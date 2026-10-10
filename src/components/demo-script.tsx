@@ -16,7 +16,7 @@ const STEPS = [
   { href: "/orders", label: "Orders", hint: "Approve the €412 Balkan Snack Distribution order" },
   { href: "/simulation", label: "Simulation", hint: "Fast-forward a week: the one number" },
   { href: "/investor/SOF-GYM-01", label: "Investor view", hint: "Statement and payout A / B / C" },
-  { href: "/owner/SOF-GYM-01", label: "Owner portal (optional)", hint: "Profit, health; accept an AI suggestion" },
+  { href: "/owner", label: "Investor portal (optional)", hint: "Sign in as an investor (docs/DEMO-ACCOUNTS.md)" },
 ];
 
 function isTypingTarget(el: EventTarget | null) {

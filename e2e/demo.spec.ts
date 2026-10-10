@@ -3,6 +3,8 @@
 // Works against the real API or, if it's down, the built-in backup data: the demo
 // must look the same either way.
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 /** Nothing on the path may scroll sideways at laptop width. */
@@ -83,11 +85,65 @@ test("tour: map, machine detail and the investor statement", async ({ page }) =>
   await expectNoSideScroll(page);
 });
 
-test("owner portal: health, profit and accepting an agent suggestion", async ({ page }) => {
+/** Demo investor logins, read from the one place they're written down. */
+function demoAccount(username: string): { username: string; password: string } {
+  const doc = readFileSync(path.join(process.cwd(), "docs", "DEMO-ACCOUNTS.md"), "utf8");
+  const row = doc.split(/\r?\n/).find((l) => l.includes("`" + username + "`"));
+  const password = row?.split("|")[3]?.trim().replace(/`/g, "");
+  if (!password) throw new Error(`No demo account ${username} in docs/DEMO-ACCOUNTS.md`);
+  return { username, password };
+}
+
+async function signIn(page: Page, username: string, next = "/owner") {
+  const { password } = demoAccount(username);
+  await page.goto(`/login?next=${encodeURIComponent(next)}`);
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+}
+
+test("investor login: own machines only, sign out", async ({ page }) => {
+  // Not signed in: the portal sends you to the login page and back afterwards.
+  await page.goto("/owner");
+  await expect(page).toHaveURL((u) => u.pathname === "/login" && u.searchParams.get("next") === "/owner");
+
+  await page.getByLabel("Username").fill("serdika");
+  await page.getByLabel("Password").fill("not-the-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.locator("form").getByRole("alert")).toContainText("don't match");
+
+  await signIn(page, "serdika");
+  await expect(page).toHaveURL((u) => u.pathname === "/owner");
+  await expect(page.getByRole("heading", { name: "Serdika Holdings" })).toBeVisible();
+  await expect(page.getByText("Signed in as")).toContainText("Serdika Holdings");
+  const cards = page.locator('main a[href^="/owner/SOF-"]');
+  await expect(cards).toHaveCount(4);
+  await expect(page.locator('main a[href="/owner/SOF-GYM-01"]')).toHaveCount(0);
+
+  // Someone else's machine: back to your own list.
   await page.goto("/owner/SOF-GYM-01");
+  await expect(page).toHaveURL((u) => u.pathname === "/owner");
+
+  // Your own machine: only your machines in the picker, and the machine view.
+  await page.locator('main a[href="/owner/SOF-HOS-02"]').click();
+  await expect(page).toHaveURL((u) => u.pathname === "/owner/SOF-HOS-02");
+  await expect(page.getByLabel("Machine").locator("option")).toHaveCount(4);
+  await expect(page.locator("section", { hasText: "Inside your machine" }).getByRole("status")).toBeVisible();
+  await expectNoSideScroll(page);
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL((u) => u.pathname === "/login" && !u.search);
+  await page.goto("/owner/SOF-HOS-02");
+  await expect(page).toHaveURL((u) => u.pathname === "/login" && u.searchParams.has("next"));
+});
+
+test("owner portal: health, profit, the machine view and an agent suggestion", async ({ page }) => {
+  await signIn(page, "lozenets", "/owner/SOF-GYM-01");
+  await expect(page).toHaveURL((u) => u.pathname === "/owner/SOF-GYM-01");
   await expect(page.getByRole("heading", { name: "My machine" })).toBeVisible();
   await expect(page.getByText("Needs attention")).toBeVisible();
   await expect(page.getByText("Profit, last 4 weeks")).toBeVisible();
+  await expect(page.getByText("model B (20% of sales)")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sales and profit by week" })).toBeVisible();
 
   // The machine as it looks on site: type B3 on the keypad and read the display.
@@ -104,8 +160,15 @@ test("owner portal: health, profit and accepting an agent suggestion", async ({ 
   await page.getByRole("button", { name: "Dismiss" }).first().click();
   await expect(page.getByText(/Dismissed: /)).toBeVisible();
 
-  await page.getByLabel("Viewing as owner of").selectOption("SOF-OFF-02");
-  await expect(page).toHaveURL(/\/owner\/SOF-OFF-02$/);
-  await expect(page.getByText("Book a technician for the card reader")).toBeVisible();
+  // Lozenets Capital owns 2 machines; switch to the other one.
+  await expect(page.getByLabel("Machine").locator("option")).toHaveCount(2);
+  await page.getByLabel("Machine").selectOption("SOF-OFF-08");
+  await expect(page).toHaveURL((u) => u.pathname === "/owner/SOF-OFF-08");
   await expectNoSideScroll(page);
+});
+
+test("owner portal: an offline machine leads with the repair", async ({ page }) => {
+  await signIn(page, "iskar", "/owner/SOF-OFF-02");
+  await expect(page).toHaveURL((u) => u.pathname === "/owner/SOF-OFF-02");
+  await expect(page.getByText("Book a technician for the card reader")).toBeVisible();
 });
