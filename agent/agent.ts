@@ -11,6 +11,7 @@ import {
   type PurchaseOrder,
   type Suggestion,
 } from "./tools.ts";
+import { getYesterdaysMisses, formatMisses } from "./misses.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const systemPrompt = readFileSync(path.join(here, "prompt.md"), "utf-8");
@@ -39,9 +40,13 @@ export async function runNight(
 ): Promise<RunResult> {
   const client = new Anthropic();
 
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: `Run the nightly restocking routine for ${date}.` },
-  ];
+  const misses = await getYesterdaysMisses(new Date());
+  const missesText = formatMisses(misses);
+  const firstMessage = missesText
+    ? `Run the nightly restocking routine for ${date}.\n\n${missesText}`
+    : `Run the nightly restocking routine for ${date}.`;
+
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content: firstMessage }];
 
   const steps: ToolStep[] = [];
   let toolCallCount = 0;

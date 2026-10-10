@@ -4,6 +4,10 @@ import {
   stock,
   avgDailySales,
   warehouse,
+  openingHours,
+  hoursSinceLastSale,
+  todaySales,
+  cashReports,
   type Coordinates,
   type StockEntry,
 } from "./mock-data.ts";
@@ -172,6 +176,17 @@ export const tools: Anthropic.Tool[] = [
   {
     name: "get_holidays",
     description: "List Bulgarian public holidays falling in the next 7 days.",
+    input_schema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "check_alerts",
+    description:
+      "Check every machine for operational problems: offline (no sale in 6+ hours during opening time), " +
+      "sudden zero sales on a normally-popular product (possible jammed slot), or cash collected differing " +
+      "from the fiscal report by over €2. Detection is deterministic — you explain the likely cause of each.",
     input_schema: {
       type: "object",
       properties: {},
@@ -451,6 +466,69 @@ function getHolidays() {
     .map((c) => ({ date: formatLocalDate(c.date), name: c.name }));
 }
 
+const OFFLINE_HOURS_THRESHOLD = 6;
+const ZERO_SALES_DAILY_THRESHOLD = 10;
+const CASH_MISMATCH_THRESHOLD_EUR = 2;
+
+export type AlertKind = "OFFLINE" | "ZERO_SALES" | "CASH_MISMATCH";
+
+export type AlertFact = {
+  machineId: string;
+  kind: AlertKind;
+  message: string;
+};
+
+// Pure detection — every number here is a fact from (mock) data, not a
+// guess. The AI's job is to read these and explain the likely cause in
+// one sentence each; it never decides *whether* something is a problem.
+function checkAlerts(): AlertFact[] {
+  const alerts: AlertFact[] = [];
+  const currentHour = new Date().getHours();
+
+  for (const machine of machines) {
+    const hours = openingHours[machine.id];
+    const isOpenNow = hours ? currentHour >= hours.open && currentHour < hours.close : true;
+    const hoursAgo = hoursSinceLastSale[machine.id] ?? 0;
+
+    if (isOpenNow && hoursAgo >= OFFLINE_HOURS_THRESHOLD) {
+      alerts.push({
+        machineId: machine.id,
+        kind: "OFFLINE",
+        message: `${machine.name} (${machine.id}) hasn't recorded a sale in ${hoursAgo} hours, during its usual opening hours.`,
+      });
+    }
+
+    const todaysSalesForMachine = todaySales[machine.id] ?? {};
+    const averagesForMachine = avgDailySales[machine.id] ?? {};
+    for (const [product, avgSales] of Object.entries(averagesForMachine)) {
+      const soldToday = todaysSalesForMachine[product] ?? 0;
+      if (avgSales >= ZERO_SALES_DAILY_THRESHOLD && soldToday === 0) {
+        alerts.push({
+          machineId: machine.id,
+          kind: "ZERO_SALES",
+          message: `${machine.name} (${machine.id}): "${product}" normally sells ~${avgSales}/day but sold 0 today.`,
+        });
+      }
+    }
+
+    const cash = cashReports[machine.id];
+    if (cash) {
+      const diff = Math.abs(cash.cashCollected - cash.fiscalReportTotal);
+      if (diff > CASH_MISMATCH_THRESHOLD_EUR) {
+        alerts.push({
+          machineId: machine.id,
+          kind: "CASH_MISMATCH",
+          message:
+            `${machine.name} (${machine.id}): cash collected (€${cash.cashCollected.toFixed(2)}) ` +
+            `differs from the fiscal report (€${cash.fiscalReportTotal.toFixed(2)}) by €${diff.toFixed(2)}.`,
+        });
+      }
+    }
+  }
+
+  return alerts;
+}
+
 async function createPurchaseOrder(
   supplier: string,
   lines: PurchaseOrderLine[],
@@ -588,6 +666,8 @@ export async function runTool(name: string, input: any): Promise<unknown> {
       return getWeather();
     case "get_holidays":
       return getHolidays();
+    case "check_alerts":
+      return checkAlerts();
     case "create_suggestion":
       return createSuggestion(
         input.type,
