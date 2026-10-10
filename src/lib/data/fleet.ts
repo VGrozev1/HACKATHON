@@ -16,6 +16,7 @@ import type {
 import { addDays, dayRange, sofiaTime, type Day } from "@/lib/sim/calendar";
 import { Prisma } from "@/generated/prisma/client";
 import { cashMismatches } from "./cash";
+import { sendOrderEmail } from "./orders";
 import { getSimToday, simNight } from "./sim-clock";
 import { loadStock, machineSlotStock, stockPercentByMachine } from "./stock";
 import { sellable } from "@/lib/sim/stock";
@@ -52,7 +53,7 @@ async function usualSalesOn(day: Day): Promise<Map<string, number>> {
  * Data-driven "what's wrong" checks for every machine. Viktor's B8 can add
  * likely causes on top; these are the facts.
  */
-async function fleetAlerts(today: Day, machineIds?: string[]): Promise<Map<string, Alert[]>> {
+export async function fleetAlerts(today: Day, machineIds?: string[]): Promise<Map<string, Alert[]>> {
   const night = simNight(today);
   const soon = new Date(night.getTime() + 24 * 3600 * 1000);
   const where = machineIds ? { machineId: { in: machineIds } } : undefined;
@@ -226,6 +227,7 @@ function toOrderDto(o: OrderRow): PurchaseOrder {
     machineIds,
     agentRunId: o.agentRunId,
     createdAt: o.createdAt.toISOString(),
+    ...(o.status === "REJECTED" ? { rejectionReasons: o.rejectionReasons } : {}),
   };
 }
 
@@ -240,6 +242,7 @@ export async function approveOrder(id: string, approvedBy = "dashboard"): Promis
   if (!order) return null;
   if (order.status === "AWAITING_APPROVAL") {
     await db.purchaseOrder.update({ where: { id }, data: { status: "APPROVED", approvedAt: new Date(), approvedBy } });
+    await sendOrderEmail(id); // B7: the supplier gets it once a human approves; status becomes SENT
   }
   return toOrderDto(await db.purchaseOrder.findUniqueOrThrow({ where: { id }, include: orderInclude }));
 }

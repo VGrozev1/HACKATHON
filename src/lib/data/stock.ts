@@ -127,6 +127,8 @@ export async function completeVisit(visitId: string, at?: Date) {
   const slots = await db.slot.findMany({ where: { machineId: visit.machineId }, include: { product: true } });
   const stock = await loadStock([visit.machineId]);
   let wasted = 0;
+  const loadedByProduct = new Map<string, number>();
+  const refilled: string[] = [];
   for (const slot of slots) {
     const item = loadList.find((l) => l.slotId === slot.id);
     const batches = stock.get(slot.id) ?? [];
@@ -138,10 +140,35 @@ export async function completeVisit(visitId: string, at?: Date) {
     });
     wasted += result.wasted;
     stock.set(slot.id, batches);
+    if (result.loaded > 0) loadedByProduct.set(slot.productId, (loadedByProduct.get(slot.productId) ?? 0) + result.loaded);
+    if (sellable(batches, at) > 0) refilled.push(slot.id);
   }
   await saveStock(stock);
+  // The loaded units left the warehouse; refilled slots are no longer out of stock.
+  const warehouse = await db.warehouseStock.findMany({ where: { productId: { in: [...loadedByProduct.keys()] } } });
+  await db.$transaction([
+    ...warehouse.map((w) =>
+      db.warehouseStock.update({ where: { productId: w.productId }, data: { quantity: Math.max(0, w.quantity - loadedByProduct.get(w.productId)!) } }),
+    ),
+    db.stockOut.updateMany({ where: { slotId: { in: refilled }, endedAt: null }, data: { endedAt: at } }),
+  ]);
   return db.visit.update({
     where: { id: visitId },
     data: { status: "DONE", doneAt: at, wastedUnits: wasted },
   });
+}
+
+/** The agent's get_stock shape: one line per product (water sits in two slots, for example). */
+export async function agentStock(machineId: string, at: Date) {
+  const slots = await machineSlotStock(machineId, at);
+  const byProduct = new Map<string, { product: string; product_id: string; count: number; capacity: number; slots: string[]; next_expiry: string | null }>();
+  for (const s of slots) {
+    const e = byProduct.get(s.productId) ?? { product: s.productName, product_id: s.productId, count: 0, capacity: 0, slots: [], next_expiry: null };
+    e.count += s.quantity;
+    e.capacity += s.capacity;
+    e.slots.push(s.code);
+    if (s.nextExpiry && (!e.next_expiry || s.nextExpiry < e.next_expiry)) e.next_expiry = s.nextExpiry;
+    byProduct.set(s.productId, e);
+  }
+  return { machine_id: machineId, products: [...byProduct.values()] };
 }

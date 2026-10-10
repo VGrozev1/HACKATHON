@@ -30,7 +30,8 @@ Every endpoint the dashboard and the agent use. The exact JSON shapes are TypeSc
 | `GET /api/benchmark` | `Benchmark` | C6 results chart | A8 (last fast-forward's result, or a dry run of the next 7 days) | real |
 | `GET /api/investors/:id/statement?month=2026-10` | `InvestorStatement` | C7 investor view (`inv-01`, `inv-02`) | A6 | real |
 | `POST /api/ingest/sale` | `{ id }` (201, 200 on retry) | simulator, real card readers | S4 + A4 (takes one unit from stock) | real |
-| `POST /api/telegram/webhook` | `{ ok }` | Telegram servers | B6 | stub |
+| `POST /api/telegram/webhook` | `{ ok }` | Telegram servers | B6 | stub (bot.ts polls instead) |
+| Agent API (below) | | Viktor's agent | Todor | real |
 
 ## How the pieces call each other
 
@@ -56,6 +57,43 @@ Every endpoint the dashboard and the agent use. The exact JSON shapes are TypeSc
 | Today (simulated) | `getSimToday()` in `src/lib/data/sim-clock.ts` |
 
 **Fast-forward and the agent (A7 ↔ B1):** fast-forward runs a night planner each simulated night. Until Viktor's agent is plugged in it uses a rule-based stand-in (`ruleBasedPlanner` in `src/lib/sim/planner.ts`). To use the real agent, implement `NightPlanner` (`plan(ctx) → { visits, adjustments, decisions, explanation }`) and pass it to `fastForward({ days, planner })`; the benchmark then measures it.
+
+## Agent API (for Viktor's tools)
+
+Everything the agent needs to make its decisions on our data. Request bodies accept **snake_case or camelCase**. Bad input returns `400 {"error": "…"}` naming each field; unknown ids return `404`. All "today"/"tomorrow" dates are the **simulated** date.
+
+| Tool | Endpoint | Returns |
+| --- | --- | --- |
+| `list_machines` | `GET /api/machines` | unchanged |
+| `get_stock` | `GET /api/machines/:id/stock` | `{ machine_id, products: [{ product, product_id, count, capacity, slots, next_expiry }] }`, one line per product |
+| `forecast` | `GET /api/machines/:id/forecast?days=1-7` | `{ machine_id, days, from, until, forecast: [{ product, product_id, avgDailySales, expectedUnits }] }` (without `days`: the dashboard shape) |
+| guardrails | `GET /api/catalog` | `{ suppliers: [{ id, name, min_order_eur, lead_time_days, approved }], products: [{ id, name, category, supplier, supplier_id, cost_eur, price_eur, shelf_life_days, warehouse_capacity }] }` |
+| route, orders | `GET /api/warehouse` | `{ name, location: { lat, lng }, products: [{ product, product_id, quantity, capacity }] }` |
+| `create_purchase_order` | `POST /api/orders` | see below; 201, or 200 when rejected |
+| `notify_stocker` | `POST /api/visits` | `{ date, visits: [{ id, machine_id, route_order, items }] }` (201), saved as PLANNED |
+| Done button | `POST /api/machines/:id/visit-done` | the completed `Visit`; 409 if no open visit |
+| `check_alerts` | `GET /api/alerts` | `[{ machineId, machineName, kind, message, likelyCause }]` |
+| dates | `GET /api/today` | `{ today, tomorrow }` |
+| `get_weather` | `GET /api/weather?days=3` | `[{ date, maxTempC, rainMm, note }]`, the weather that drives simulated sales |
+| `get_holidays` | `GET /api/holidays?days=7` | `[{ date, name }]` |
+| `misses.ts` | `GET /api/machines/:id/sales/products?date=YYYY-MM-DD` | `{ machine_id, date, products: [{ product, product_id, units }] }` |
+| `create_suggestion` | `POST /api/suggestions` | the `Suggestion` (201); 422 `{ error, status: "rejected", reasons }` when a rule is broken |
+| dashboard, Telegram | `GET /api/suggestions?status=pending\|accepted\|rejected\|all&machine_id=` | `Suggestion[]`, newest first |
+| Accept / Reject buttons | `POST /api/suggestions/:id/accept`, `/reject` | the `Suggestion`; 409 if already decided |
+
+**Orders.** Body: `{ "supplier": "Sofia Beverages Ltd", "lines": [{ "product": "Devin water 0.5 l", "quantity": 200 }], "reason": "Gym weekend water" }`. Supplier and products by name or id (from `/api/catalog`). Checked on the server: known approved supplier, the product comes from that supplier, quantity 1–1000, sells through before it expires (fleet sales over 4 weeks), fits in the warehouse, meets the supplier minimum. Over €300 (`AUTO_APPROVE_LIMIT_EUR`) waits for approval; otherwise it is emailed to the supplier straight away (status becomes SENT). Rejected orders are stored with their reasons. Answer:
+
+```json
+{ "id": "PO-0006", "supplier": "Sofia Beverages Ltd", "lines": [{ "product": "Devin water 0.5 l", "quantity": 200 }],
+  "reason": "Gym weekend water", "createdAt": "2026-10-10T15:58:00Z", "status": "approved",
+  "totalEur": 95.5, "reasons": [], "emailed": true, "delivery_date": "2026-10-12" }
+```
+
+`POST /api/orders/:id/approve` (dashboard or Telegram) approves an awaiting order and emails it.
+
+**Visits.** Body: `{ "route": ["SOF-GYM-01", "SOF-OFF-01"], "load_lists": [{ "machine_id": "SOF-GYM-01", "items": [{ "product": "Devin water 0.5 l", "quantity": 40 }] }] }`. Products are spread over the machine's slots that hold them; more than those slots hold is a 400. Re-planning the same day replaces its open visits. "Done" loads the stock, takes the units out of the warehouse and closes the slots' stock-outs.
+
+**Suggestions.** Body: `{ "type": "price_change", "machine_id": "SOF-GYM-04", "product": "Isotonic drink 0.5 l", "suggestion": "…", "reason": "…", "expected_effect": "…", "percent_change": 8 }`. Text fields up to 300 characters; at most 5 per night; price changes within ±15% on a product the machine sells. Accepting or rejecting changes only the status, never prices, stock or orders.
 
 ## Sale event format (task S4)
 
