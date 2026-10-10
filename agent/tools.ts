@@ -8,6 +8,7 @@ import {
   type StockEntry,
 } from "./mock-data.ts";
 import { checkOrder, type OrderStatus } from "./guardrails.ts";
+import { sendSupplierEmail } from "./email.ts";
 
 // ---- Tool descriptions (what we show Claude) -----------------------------
 
@@ -78,7 +79,8 @@ export const tools: Anthropic.Tool[] = [
     description:
       "Create a purchase order with a supplier for a list of products and quantities, with a reason for the order. " +
       "The order is automatically checked against supplier/product/quantity/expiry/capacity/minimum-order rules — " +
-      "the result's status is \"approved\", \"awaiting_approval\" (needs a human), or \"rejected\" (with reasons you should fix and retry).",
+      "the result's status is \"approved\", \"awaiting_approval\" (needs a human), or \"rejected\" (with reasons you should fix and retry). " +
+      "Approved orders are emailed to the supplier automatically; awaiting_approval orders are not emailed yet.",
     input_schema: {
       type: "object",
       properties: {
@@ -159,6 +161,7 @@ export type PurchaseOrder = {
   status: OrderStatus;
   totalEur: number;
   reasons: string[];
+  emailed: boolean;
 };
 
 export const purchaseOrders: PurchaseOrder[] = [];
@@ -242,11 +245,11 @@ function planRoute(machineIds: string[]) {
   return { route };
 }
 
-function createPurchaseOrder(
+async function createPurchaseOrder(
   supplier: string,
   lines: PurchaseOrderLine[],
   reason: string,
-): PurchaseOrder {
+): Promise<PurchaseOrder> {
   const { status, totalEur, reasons } = checkOrder(supplier, lines);
 
   const order: PurchaseOrder = {
@@ -258,8 +261,19 @@ function createPurchaseOrder(
     status,
     totalEur,
     reasons,
+    emailed: false,
   };
+  // Record the order before attempting to email it, so a failed send still
+  // leaves a trace instead of silently losing the order.
   purchaseOrders.push(order);
+
+  // Only approved orders go out — awaiting_approval needs a human first
+  // (Step 9), and rejected orders were never going to be bought.
+  if (status === "approved") {
+    await sendSupplierEmail(order);
+    order.emailed = true;
+  }
+
   return order;
 }
 
