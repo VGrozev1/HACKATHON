@@ -54,7 +54,7 @@ These are created by hand once. The person in the second column creates the acco
 | --- | --- | --- | --- |
 | GitHub repo | done | github.com/VGrozev1/HACKATHON | — |
 | Supabase (dev project) | done | project `vending-agent-dev` (ref `wswjqtipgwtjdsnxqvcu`, Frankfurt); schema already applied. Todor: Project Settings → Database → Reset password, then the **Connect** button → ORMs → Prisma for both strings | `DATABASE_URL`, `DIRECT_URL` |
-| Vercel | Kalin | vercel.com → Import the GitHub repo | add all `.env` values under Project → Settings → Environment Variables |
+| Vercel | done (Todor) | https://vending-agent-pi.vercel.app, project `vending-agent`, region fra1; redeploy with `vercel deploy --prod` | add all `.env` values under Project → Settings → Environment Variables, plus `NEXT_PUBLIC_USE_MOCK=false` |
 | Claude API | Viktor | console.anthropic.com → API keys | `ANTHROPIC_API_KEY` |
 | Telegram bot | Viktor | message @BotFather in Telegram → `/newbot` | `TELEGRAM_BOT_TOKEN` |
 | Resend | Viktor | resend.com → API keys | `RESEND_API_KEY` |
