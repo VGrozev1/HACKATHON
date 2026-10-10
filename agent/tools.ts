@@ -1,24 +1,16 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { avgDailySales, warehouse, suppliers, products, type Coordinates } from "./mock-data.ts";
-import {
-  checkOrder,
-  checkSuggestion,
-  type OrderStatus,
-  type OrderCatalog,
-  type SuggestionType,
-} from "./guardrails.ts";
-import { sendSupplierEmail } from "./email.ts";
 import { sendTelegram } from "./telegram.ts";
-import { apiGet } from "./api.ts";
+import { apiGet, apiPost } from "./api.ts";
 // Type-only — erased at runtime, so this never creates an actual
 // dependency on Todor's code. It just keeps our shapes honest to the
 // contract in api.md as he fills in the real endpoints.
-import type { MachineSummary, MachineDetail, MachineForecast, SlotStock, Alert } from "../src/lib/api-types.ts";
+import type { MachineSummary } from "../src/lib/api-types.ts";
 // Real (not type-only) import: these are pure functions with no imports of
-// their own (no Prisma, no DB) — the same deterministic weather/holiday
-// calendar driving the simulated economy's actual demand, so the agent
-// reasons about the same world its forecast numbers come from.
-import { weatherOn, holidayOn, addDays } from "../src/lib/sim/calendar.ts";
+// their own (no Prisma, no DB) — used only for the DEMO_HEATWAVE override's
+// date labels, since everything else now goes through /api/weather instead.
+import { addDays } from "../src/lib/sim/calendar.ts";
+
+type Coordinates = { lat: number; lng: number };
 
 // ---- Tool descriptions (what we show Claude) -----------------------------
 
@@ -36,7 +28,8 @@ export const tools: Anthropic.Tool[] = [
   {
     name: "get_stock",
     description:
-      "Get current stock levels for every slot in a vending machine: how many units are left and the slot's total capacity.",
+      "Get current stock for a vending machine, one line per product: units left, total slot " +
+      "capacity across the slots holding it, which slot codes, and the next expiry date if any.",
     input_schema: {
       type: "object",
       properties: {
@@ -89,8 +82,9 @@ export const tools: Anthropic.Tool[] = [
     name: "create_purchase_order",
     description:
       "Create a purchase order with a supplier for a list of products and quantities, with a reason for the order. " +
-      "The order is automatically checked against supplier/product/quantity/expiry/capacity/minimum-order rules — " +
-      "the result's status is \"approved\", \"awaiting_approval\" (needs a human), or \"rejected\" (with reasons you should fix and retry). " +
+      "Checked against the real catalog (approved supplier, product-supplier match, quantity 1-1000, sell-through " +
+      "before expiry, warehouse capacity, supplier minimum) — the result's status is \"approved\", " +
+      "\"awaiting_approval\" (needs a human), or \"rejected\" (with reasons you should fix and retry). " +
       "Approved orders are emailed to the supplier automatically; awaiting_approval orders are not emailed yet — " +
       "instead a Telegram message with an Approve button is sent to the approver.",
     input_schema: {
@@ -193,7 +187,7 @@ export const tools: Anthropic.Tool[] = [
     description:
       "Record a suggestion for the manager to review — never applied automatically, only stored as \"pending\" " +
       "and sent to the approver on Telegram with Accept/Reject buttons. At most 5 per night (extras are rejected " +
-      "with a reason); price_change suggestions are capped at ±15% and must name a product we carry.",
+      "with a reason); price_change suggestions are capped at ±15% and must name a product the machine sells.",
     input_schema: {
       type: "object",
       properties: {
@@ -235,95 +229,64 @@ export const tools: Anthropic.Tool[] = [
   },
 ];
 
-// ---- Purchase orders (in-memory for now; Step 6 adds real checks) --------
-
-type PurchaseOrderLine = { product: string; quantity: number };
+// ---- Purchase orders (recorded locally for this run's summary; the real
+// validation, persistence, and supplier email all happen server-side now,
+// POST /api/orders) -------------------------------------------------------
 
 export type PurchaseOrder = {
   id: string;
   supplier: string;
-  lines: PurchaseOrderLine[];
+  lines: { product: string; quantity: number }[];
   reason: string;
   createdAt: string;
-  status: OrderStatus;
+  status: "approved" | "awaiting_approval" | "rejected";
   totalEur: number;
   reasons: string[];
   emailed: boolean;
+  delivery_date?: string;
 };
 
 export const purchaseOrders: PurchaseOrder[] = [];
-let nextOrderId = 1;
 
-// ---- Suggestions (never auto-applied — stored for a human to decide) -----
+// ---- Suggestions (never auto-applied — the server stores accepted ones;
+// rejected attempts are kept here only, for this run's audit trail) -------
+
+export type SuggestionType = "extra_stock" | "product_swap" | "price_change" | "visit_change";
 
 export type Suggestion = {
-  id: string;
-  runDate: string;
+  id?: string;
+  runDate?: string;
   type: SuggestionType;
   machineId: string;
-  machineName: string;
+  machineName?: string;
   product?: string;
   suggestion: string;
   reason: string;
   expectedEffect: string;
-  percentChange?: number;
+  percentChange?: number | null;
   status: "pending" | "accepted" | "rejected";
-  reasons: string[];
+  reasons?: string[];
+  createdAt?: string;
+  decidedAt?: string | null;
 };
 
 export const suggestions: Suggestion[] = [];
-let nextSuggestionId = 1;
-// Counts only successfully-created ("pending") suggestions — a rejected
-// attempt (bad machine, price change too big, etc.) never used up a slot.
-let pendingSuggestionsTonight = 0;
 
 // ---- Tool implementations -------------------------------------------------
 
-// Always real now — list_machines/get_stock no longer have a USE_MOCK
-// branch. Keeping two implementations of the same real data stopped being
-// worth it once /api/machines covered this; USE_MOCK still applies to
-// create_purchase_order/create_suggestion's catalogs (suppliers, products,
-// warehouse — no real endpoint for those yet).
 async function listMachines(): Promise<MachineSummary[]> {
   return apiGet<MachineSummary[]>("/api/machines");
 }
 
-async function getStock(machineId: string): Promise<SlotStock[] | { error: string }> {
-  const detail = await apiGet<MachineDetail>(`/api/machines/${encodeURIComponent(machineId)}`);
-  return detail.slots;
-}
-
-// Days between two "YYYY-MM-DD" strings (at least 1, so a same-day window
-// never divides by zero).
-function dayCount(from: string, until: string): number {
-  return Math.max(1, Math.round((Date.parse(until) - Date.parse(from)) / 86400000));
+async function getStock(machineId: string) {
+  return apiGet(`/api/machines/${encodeURIComponent(machineId)}/stock`);
 }
 
 async function forecast(machineId: string, days: number) {
   if (!Number.isInteger(days) || days < 1 || days > 7) {
     return { error: `"days" must be an integer between 1 and 7, got ${days}` };
   }
-
-  // Todor's real forecast (A5/B4) is a baseline over "until the next visit",
-  // not a fixed N-day window — convert it to a per-day rate, then project
-  // that rate over the days Claude actually asked for. It only has slot ids
-  // and product ids, so join against the machine detail for product names.
-  const [detail, fc] = await Promise.all([
-    apiGet<MachineDetail>(`/api/machines/${encodeURIComponent(machineId)}`),
-    apiGet<MachineForecast>(`/api/machines/${encodeURIComponent(machineId)}/forecast`),
-  ]);
-  const productNameBySlot = new Map(detail.slots.map((s) => [s.slotId, s.productName]));
-  const windowDays = dayCount(fc.from, fc.until);
-  const forecastLines = fc.slots.map((s) => {
-    const daily = s.baseline / windowDays;
-    return {
-      product: productNameBySlot.get(s.slotId) ?? s.productId,
-      avgDailySales: Math.round(daily * 100) / 100,
-      expectedUnits: Math.round(daily * days),
-    };
-  });
-
-  return { machine_id: machineId, days, forecast: forecastLines };
+  return apiGet(`/api/machines/${encodeURIComponent(machineId)}/forecast?days=${days}`);
 }
 
 // Straight-line distance between two coordinates. Good enough for a city
@@ -335,10 +298,10 @@ function distance(a: Coordinates, b: Coordinates): number {
 }
 
 async function planRoute(machineIds: string[]) {
-  // list_machines already resolves to the real fleet when it's available —
-  // reusing it here means plan_route gets real coordinates for free, with
-  // no separate mock/real branch of its own.
-  const fleet = await listMachines();
+  const [fleet, warehouse] = await Promise.all([
+    listMachines(),
+    apiGet<{ location: Coordinates }>("/api/warehouse"),
+  ]);
   const byId = new Map(fleet.map((m) => [m.id, { lat: m.lat, lng: m.lng }]));
 
   const stops: { id: string; location: Coordinates }[] = [];
@@ -350,8 +313,7 @@ async function planRoute(machineIds: string[]) {
     stops.push({ id, location });
   }
 
-  // Nearest-neighbour: start at the warehouse (no real endpoint for this —
-  // it's one fixed address, not fleet data), repeatedly jump to whichever
+  // Nearest-neighbour: start at the warehouse, repeatedly jump to whichever
   // remaining stop is closest to wherever we currently are.
   const remaining = [...stops];
   const route: string[] = [];
@@ -375,8 +337,6 @@ async function planRoute(machineIds: string[]) {
   return { route };
 }
 
-const SOFIA_LOCATION = { lat: 42.6977, lng: 23.3219 };
-
 // Formats a Date as a local-calendar "YYYY-MM-DD" string. We deliberately
 // don't use toISOString() for this: it always converts to UTC, which shifts
 // the date backward by a day for any timezone ahead of UTC (e.g. Sofia).
@@ -390,175 +350,53 @@ function formatLocalDate(date: Date): string {
 // The simulated day (SimState.today) driving the app's actual demand
 // numbers — not the real calendar date, which can drift from it once
 // fast-forward has moved the sim clock on. Falls back to the real local
-// date if /api/health doesn't return one (USE_MOCK=1, or the API's down)
-// — every caller still gets a usable date, just logged so the fallback
-// isn't silently wrong forever.
+// date if /api/today is unreachable, so a caller always gets a usable
+// date — logged so the fallback isn't silently wrong forever.
 let cachedSimToday: string | undefined;
 export async function getSimToday(): Promise<string> {
-  if (process.env.USE_MOCK === "1") return formatLocalDate(new Date());
   if (cachedSimToday) return cachedSimToday;
   try {
-    const health = await apiGet<{ today?: string }>("/api/health");
-    if (!health.today) throw new Error("GET /api/health has no \"today\" field");
-    cachedSimToday = health.today;
+    cachedSimToday = (await apiGet<{ today: string }>("/api/today")).today;
   } catch (err) {
-    console.error("Could not read the simulated day from /api/health, falling back to the real date:", err);
+    console.error("Could not read the simulated day from /api/today, falling back to the real date:", err);
     cachedSimToday = formatLocalDate(new Date());
   }
   return cachedSimToday;
 }
 
 async function getWeather() {
-  const today = await getSimToday();
-  const days = [1, 2, 3].map((offset) => addDays(today, offset));
-
   // DEMO_HEATWAVE=1 skips the real weather source so a demo can reliably
   // show the "hot day -> more cold drinks" behavior on demand.
   if (process.env.DEMO_HEATWAVE === "1") {
-    return days.map((date) => ({ date, maxTempC: 35, rainMm: 0 }));
+    const today = await getSimToday();
+    return [1, 2, 3].map((offset) => ({ date: addDays(today, offset), maxTempC: 35, rainMm: 0 }));
   }
-
-  if (process.env.USE_MOCK === "1") {
-    // No simulated economy to stay consistent with in mock mode — ask
-    // the real Sofia weather instead, just for demo flavor.
-    try {
-      const url =
-        `https://api.open-meteo.com/v1/forecast?latitude=${SOFIA_LOCATION.lat}&longitude=${SOFIA_LOCATION.lng}` +
-        `&daily=temperature_2m_max,precipitation_sum&timezone=Europe%2FSofia&forecast_days=3`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        return { error: `Open-Meteo request failed with status ${response.status}` };
-      }
-      const data = await response.json();
-      return data.daily.time.map((date: string, i: number) => ({
-        date,
-        maxTempC: data.daily.temperature_2m_max[i],
-        rainMm: data.daily.precipitation_sum[i],
-      }));
-    } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-
-  // Real mode: the same deterministic weather driving the simulated
-  // economy's actual demand (src/lib/sim/calendar.ts), not real Sofia
-  // weather — otherwise the agent would reason about a day that has
-  // nothing to do with the forecast numbers it's also reading. rainMm is
-  // approximated from the simulated world's rainy/not-rainy flag, which
-  // doesn't model a precise rainfall amount.
-  return days.map((date) => {
-    const w = weatherOn(date);
-    return { date, maxTempC: w.tMaxC, rainMm: w.rainy ? 5 : 0 };
-  });
-}
-
-// Fixed-date Bulgarian public holidays (month is 1-indexed), used only
-// under USE_MOCK=1. Orthodox Easter and the holidays tied to it (Good
-// Friday, Easter Sunday/Monday) move every year and are NOT included here
-// — add their dates by hand each year. Real mode uses holidayOn() from
-// the simulated calendar instead (below), which already applies
-// weekend-observed shifts for the days it covers.
-const FIXED_HOLIDAYS: { month: number; day: number; name: string }[] = [
-  { month: 1, day: 1, name: "New Year's Day" },
-  { month: 3, day: 3, name: "Liberation Day" },
-  { month: 5, day: 1, name: "Labour Day" },
-  { month: 5, day: 6, name: "St. George's Day / Army Day" },
-  { month: 5, day: 24, name: "Culture and Literacy Day" },
-  { month: 9, day: 6, name: "Unification Day" },
-  { month: 9, day: 22, name: "Independence Day" },
-  { month: 12, day: 24, name: "Christmas Eve" },
-  { month: 12, day: 25, name: "Christmas Day" },
-  { month: 12, day: 26, name: "Second Day of Christmas" },
-];
-
-function mockGetHolidays() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const horizon = new Date(today);
-  horizon.setDate(horizon.getDate() + 7);
-
-  // Build candidate dates for this year and next, in case the 7-day window
-  // crosses a New Year's boundary (e.g. Dec 27 -> Jan 2).
-  const candidates: { date: Date; name: string }[] = [];
-  for (const year of [today.getFullYear(), today.getFullYear() + 1]) {
-    for (const holiday of FIXED_HOLIDAYS) {
-      candidates.push({ date: new Date(year, holiday.month - 1, holiday.day), name: holiday.name });
-    }
-  }
-
-  return candidates
-    .filter((c) => c.date >= today && c.date <= horizon)
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
-    .map((c) => ({ date: formatLocalDate(c.date), name: c.name }));
+  return apiGet("/api/weather?days=3");
 }
 
 async function getHolidays() {
-  if (process.env.USE_MOCK === "1") return mockGetHolidays();
-
-  // Real mode: the simulated world's own holiday calendar (src/lib/sim/calendar.ts),
-  // over the same today..today+7 window as the mock version above.
-  const today = await getSimToday();
-  return Array.from({ length: 8 }, (_, i) => addDays(today, i))
-    .map((date) => ({ date, name: holidayOn(date) }))
-    .filter((h): h is { date: string; name: string } => h.name !== null);
+  return apiGet("/api/holidays?days=7");
 }
 
-// STOCK_OUT (a slot is empty right now) and EXPIRING (food about to go
-// off) are self-explanatory from their message, so there's no extra
-// "likely cause" reasoning needed for them.
-export type AlertKind = "OFFLINE" | "ZERO_SALES" | "CASH_MISMATCH" | "STOCK_OUT" | "EXPIRING";
-
-export type AlertFact = {
-  machineId: string;
-  kind: AlertKind;
-  message: string;
-};
-
-function withCause(alert: Alert): string {
-  return alert.likelyCause ? `${alert.message} (${alert.likelyCause})` : alert.message;
-}
-
-// Always real now — no USE_MOCK branch. /api/machines (A6) already
-// computes every alert kind server-side from real stock, sales and cash
-// data; there was never a faithful mock-only equivalent (mock-data.ts
-// only modeled 3 of the 5 real alert kinds, from thresholds that had no
-// real counterpart — opening hours, hour-of-last-sale, cash reports).
-async function checkAlerts(): Promise<AlertFact[]> {
-  const fleet = await listMachines();
-  return fleet.flatMap((m) => m.alerts.map((a) => ({ machineId: m.id, kind: a.kind, message: withCause(a) })));
+async function checkAlerts() {
+  return apiGet("/api/alerts");
 }
 
 async function createPurchaseOrder(
   supplier: string,
-  lines: PurchaseOrderLine[],
+  lines: { product: string; quantity: number }[],
   reason: string,
 ): Promise<PurchaseOrder> {
-  // No real endpoint yet for the product/supplier catalog or warehouse
-  // capacity — mock-data.ts is the only source either mode has for these.
-  const catalog: OrderCatalog = { suppliers, products, warehouse, avgDailySales };
-  const { status, totalEur, reasons } = checkOrder(supplier, lines, catalog);
-
-  const order: PurchaseOrder = {
-    id: `PO-${String(nextOrderId++).padStart(4, "0")}`,
-    supplier,
-    lines,
-    reason,
-    createdAt: new Date().toISOString(),
-    status,
-    totalEur,
-    reasons,
-    emailed: false,
-  };
-  // Record the order before attempting to email it, so a failed send still
-  // leaves a trace instead of silently losing the order.
+  // Every rule (approved supplier, product-supplier match, quantity bounds,
+  // sell-through before expiry, warehouse capacity, supplier minimum) is
+  // checked server-side against the real catalog — that's the final word,
+  // not a local guess, so there's nothing to re-check here.
+  const order = await apiPost<PurchaseOrder>("/api/orders", { supplier, lines, reason });
   purchaseOrders.push(order);
 
-  // Only approved orders go out — awaiting_approval needs a human to tap
-  // Approve first, and rejected orders were never going to be bought.
-  if (status === "approved") {
-    await sendSupplierEmail(order);
-    order.emailed = true;
-  } else if (status === "awaiting_approval") {
+  // The server emails approved orders itself. Only the "needs a human"
+  // case is still this agent's job: a Telegram button for the approver.
+  if (order.status === "awaiting_approval") {
     await sendTelegram(
       `Purchase order ${order.id} awaiting approval\n` +
         `Supplier: ${order.supplier}\n` +
@@ -581,50 +419,60 @@ async function createSuggestion(
   expectedEffect: string,
   percentChange: number | undefined,
 ): Promise<Suggestion> {
-  // One fetch of the real fleet (or mock, via list_machines' own branching)
-  // covers both the "does this machine exist" guardrail and its display name.
-  const fleet = await listMachines();
-  const machine = fleet.find((m) => m.id === machineId);
-  // Products have no real catalog yet — still mock-data.ts either way.
-  const check = checkSuggestion(
-    { type, machineId, product, percentChange },
-    pendingSuggestionsTonight,
-    { machines: fleet, products },
-  );
+  const base = process.env.APP_URL;
+  const res = await fetch(`${base}/api/suggestions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type,
+      machine_id: machineId,
+      product,
+      suggestion: suggestionText,
+      reason,
+      expected_effect: expectedEffect,
+      percent_change: percentChange,
+    }),
+  });
+  const body = await res.json();
 
-  const record: Suggestion = {
-    id: `SUG-${String(nextSuggestionId++).padStart(4, "0")}`,
-    runDate: formatLocalDate(new Date()),
-    type,
-    machineId,
-    machineName: machine?.name ?? machineId,
-    product,
-    suggestion: suggestionText,
-    reason,
-    expectedEffect,
-    percentChange,
-    status: check.status,
-    reasons: check.reasons,
-  };
-  // Record it either way — a rejected attempt is still worth keeping for
-  // the audit trail, same reasoning as rejected purchase orders.
+  // 422 means a guardrail rejected it (machine/product unknown, price cap,
+  // 5-a-night limit) — a normal, expected outcome the agent should read and
+  // react to, not a network failure. Anything else unexpected still throws,
+  // same as every other tool (caught by agent.ts's own try/catch).
+  if (res.status === 422 && body.status === "rejected") {
+    const record: Suggestion = {
+      type,
+      machineId,
+      product,
+      suggestion: suggestionText,
+      reason,
+      expectedEffect,
+      percentChange,
+      status: "rejected",
+      reasons: body.reasons,
+    };
+    suggestions.push(record);
+    return record;
+  }
+  if (!res.ok) {
+    throw new Error(`Todor's API error calling /api/suggestions: ${res.status} ${body.error ?? res.statusText}`);
+  }
+
+  const record: Suggestion = body;
   suggestions.push(record);
 
-  if (check.status === "pending") {
-    pendingSuggestionsTonight++;
-    await sendTelegram(
-      `Suggestion ${record.id} (${record.type}) — ${record.machineId}` +
-        (record.product ? ` — ${record.product}` : "") +
-        `\n${record.suggestion}\n` +
-        `Reason: ${record.reason}\n` +
-        `Expected effect: ${record.expectedEffect}`,
-      [
-        { text: "Accept", callback_data: `sug_ok:${record.id}` },
-        { text: "Reject", callback_data: `sug_no:${record.id}` },
-      ],
-      process.env.TELEGRAM_APPROVER_CHAT_ID!,
-    );
-  }
+  await sendTelegram(
+    `Suggestion ${record.id} (${record.type}) — ${record.machineId}` +
+      (record.product ? ` — ${record.product}` : "") +
+      `\n${record.suggestion}\n` +
+      `Reason: ${record.reason}\n` +
+      `Expected effect: ${record.expectedEffect}`,
+    [
+      { text: "Accept", callback_data: `sug_ok:${record.id}` },
+      { text: "Reject", callback_data: `sug_no:${record.id}` },
+    ],
+    process.env.TELEGRAM_APPROVER_CHAT_ID!,
+  );
 
   return record;
 }
@@ -633,15 +481,9 @@ async function notifyStocker(
   route: string[],
   loadLists: { machine_id: string; items: { product: string; quantity: number }[] }[],
 ) {
-  console.log("--- Stocker notification ---");
-  console.log(`Route: ${route.join(" -> ")}`);
-  for (const stop of loadLists) {
-    console.log(`${stop.machine_id}:`);
-    for (const item of stop.items) {
-      console.log(`  - ${item.product}: ${item.quantity}`);
-    }
-  }
-  console.log("-----------------------------");
+  // Persist tomorrow's route server-side (validates product->slot mapping
+  // and capacity) before telling the stocker about it.
+  await apiPost("/api/visits", { route, load_lists: loadLists });
 
   await sendTelegram(`Tonight's route:\n${route.join(" → ")}`);
 

@@ -1,13 +1,6 @@
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { callTelegramApi } from "./telegram.ts";
-import { sendSupplierEmail } from "./email.ts";
-import type { PurchaseOrder } from "./tools.ts";
-import type { RunResult } from "./agent.ts";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const runsDir = path.join(here, "runs");
+import { apiPost } from "./api.ts";
 
 const STOCKER_CHAT_ID = process.env.TELEGRAM_STOCKER_CHAT_ID!;
 const APPROVER_CHAT_ID = process.env.TELEGRAM_APPROVER_CHAT_ID!;
@@ -24,56 +17,6 @@ type TelegramUpdate = {
     message?: { chat?: { id: number | string } };
   };
 };
-
-async function findNewestRunFile(): Promise<string | null> {
-  let entries: string[];
-  try {
-    entries = await readdir(runsDir);
-  } catch {
-    return null; // no runs/ directory yet — nothing has run tonight
-  }
-
-  const jsonFiles = entries.filter((f) => f.endsWith(".json"));
-  if (jsonFiles.length === 0) return null;
-
-  let newest: { file: string; mtimeMs: number } | null = null;
-  for (const file of jsonFiles) {
-    const fullPath = path.join(runsDir, file);
-    const stats = await stat(fullPath);
-    if (!newest || stats.mtimeMs > newest.mtimeMs) {
-      newest = { file: fullPath, mtimeMs: stats.mtimeMs };
-    }
-  }
-  return newest?.file ?? null;
-}
-
-async function findOrderInNewestRun(orderId: string): Promise<PurchaseOrder | null> {
-  const newestFile = await findNewestRunFile();
-  if (!newestFile) return null;
-
-  const content = await readFile(newestFile, "utf-8");
-  const run = JSON.parse(content) as RunResult;
-  return run.orders.find((order) => order.id === orderId) ?? null;
-}
-
-// Suggestions are never applied — this only updates the status field on
-// disk, in the same run file Todor's API will eventually read from.
-async function setSuggestionStatus(
-  suggestionId: string,
-  status: "accepted" | "rejected",
-): Promise<boolean> {
-  const newestFile = await findNewestRunFile();
-  if (!newestFile) return false;
-
-  const content = await readFile(newestFile, "utf-8");
-  const run = JSON.parse(content) as RunResult;
-  const suggestion = run.suggestions?.find((s) => s.id === suggestionId);
-  if (!suggestion) return false;
-
-  suggestion.status = status;
-  await writeFile(newestFile, JSON.stringify(run, null, 2));
-  return true;
-}
 
 async function handleCallback(
   callbackQuery: NonNullable<TelegramUpdate["callback_query"]>,
@@ -105,19 +48,17 @@ async function handleCallback(
 
   try {
     if (action === "done" && chatId === STOCKER_CHAT_ID) {
-      // Step 11 will call Todor's API here instead of just logging.
-      console.log(`Visit to ${id} marked done.`);
+      // id here is a machine id, not a visit id — see POST /api/machines/:id/visit-done.
+      await apiPost(`/api/machines/${encodeURIComponent(id)}/visit-done`);
       processedActions.add(data);
       await callTelegramApi("answerCallbackQuery", {
         callback_query_id: callbackQuery.id,
         text: `${id} marked done.`,
       });
     } else if (action === "approve" && chatId === APPROVER_CHAT_ID) {
-      const order = await findOrderInNewestRun(id);
-      if (!order) {
-        throw new Error(`Order ${id} not found in the latest run.`);
-      }
-      await sendSupplierEmail(order);
+      // Approving, emailing the supplier, and setting status SENT all
+      // happen server-side now.
+      await apiPost(`/api/orders/${encodeURIComponent(id)}/approve`);
       processedActions.add(data);
       await callTelegramApi("answerCallbackQuery", {
         callback_query_id: callbackQuery.id,
@@ -126,16 +67,14 @@ async function handleCallback(
     } else if (action === "sug_ok" && chatId === APPROVER_CHAT_ID) {
       // Accepting a suggestion only records the decision — it never
       // touches prices, stock, or orders by itself.
-      const found = await setSuggestionStatus(id, "accepted");
-      if (!found) throw new Error(`Suggestion ${id} not found in the latest run.`);
+      await apiPost(`/api/suggestions/${encodeURIComponent(id)}/accept`);
       processedActions.add(data);
       await callTelegramApi("answerCallbackQuery", {
         callback_query_id: callbackQuery.id,
         text: "Marked accepted.",
       });
     } else if (action === "sug_no" && chatId === APPROVER_CHAT_ID) {
-      const found = await setSuggestionStatus(id, "rejected");
-      if (!found) throw new Error(`Suggestion ${id} not found in the latest run.`);
+      await apiPost(`/api/suggestions/${encodeURIComponent(id)}/reject`);
       processedActions.add(data);
       await callTelegramApi("answerCallbackQuery", {
         callback_query_id: callbackQuery.id,
