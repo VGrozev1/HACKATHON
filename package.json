@@ -14,6 +14,9 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
+    "sim:report": "tsx scripts/sim-report.ts",
+    "sim:forecast-check": "tsx scripts/forecast-check.ts",
+    "sim:benchmark": "tsx scripts/benchmark-check.ts",
     "demo:check": "playwright test",
     "demo:record": "playwright test"
   },

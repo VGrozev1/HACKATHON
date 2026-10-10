@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Viktor's standalone agent experiments: own package.json and tsconfig rules.
+    "agent/**",
   ]),
 ]);
 

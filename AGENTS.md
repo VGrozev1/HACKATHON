@@ -21,7 +21,7 @@ An AI agent that plans the nightly orders and restocking route for 20 simulated 
 
 | Person | Tasks | Owns |
 | --- | --- | --- |
-| Todor | A1–A9 (data, simulation, backend) | `prisma/`, `src/lib/sim/`, data routes in `src/app/api/` |
+| Todor | A1–A9 (data, simulation, backend) | `prisma/`, `src/lib/sim/`, `src/lib/data/`, data routes in `src/app/api/` |
 | Viktor | B1–B9 (agent, integrations) | `src/lib/agent/`, `src/lib/integrations/`, `src/app/api/agent/`, `src/app/api/telegram/` |
 | Kalin | C1–C9 (frontend, demo) | `src/app/` pages, `src/components/` |
 
@@ -37,8 +37,40 @@ Next.js 16 App Router + TypeScript, Prisma 7 (with `@prisma/adapter-pg`) on Supa
 - **Live database:** Supabase project `vending-agent-dev` (ref `wswjqtipgwtjdsnxqvcu`, eu-central-1). The `init` migration is applied. It's a dev project only; nothing real lives there.
 - **Changing the schema:** edit `schema.prisma`, run `npm run db:migrate -- --name <change>`, commit the migration folder, and tell the team (it changes the API). Never edit an applied migration.
 - **Client:** import `db` from `src/lib/db.ts` only; never create another `PrismaClient`. The client is generated into `src/generated/prisma` (gitignored; `npm install` regenerates it).
+- **Timestamps** are stored as `timestamp` (no time zone) holding UTC. In raw SQL, convert to Sofia time with `("occurredAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Sofia'`; a single `AT TIME ZONE` shifts the wrong way.
+- **Demo data:** `npm run db:seed` wipes and reseeds the dev database (same data every time, sim clock back to 2026-10-10). `npm run sim:report` prints the simulation numbers without touching the database; `npm run sim:forecast-check` grades the forecast against true demand; `npm run sim:benchmark -- 7` runs agent vs fixed in memory.
+- **Dev server after a schema change:** restart `npm run dev`. The cached Prisma client doesn't pick up new models on hot reload.
 - **RLS** is on for every table with no policies. That blocks Supabase's public REST API on purpose; Prisma connects as the owner and is unaffected. New tables need `ALTER TABLE "X" ENABLE ROW LEVEL SECURITY;` added to their migration.
 - **Prisma 7 differs from older versions:** the connection URL lives in `prisma.config.ts`, not the schema; the generator is `prisma-client` with an explicit output. The skills in `.claude/skills/prisma-*` cover the details.
+
+### Simulator (`src/lib/sim/`)
+
+| File | What |
+| --- | --- |
+| `fleet.ts` | A2: 3 suppliers, 29 products, 20 machines in Sofia, slot layouts per location type, investors |
+| `calendar.ts` | Days, Sofia time, public holidays, weather. **Shared with the agent:** B4 reads holidays and `weatherOn(day)` from here, the same world the demand comes from |
+| `demand.ts` | A3: hourly, weekday, holiday, season and weather effects; `expectedSlotDemand` is the true mean that the A5 forecast estimates |
+| `generator.ts` | A3: `generateDay(day)` gives purchase attempts in the S4 sale event format, deterministic per day |
+| `stock.ts` | In-memory stock batches: oldest sold first, expired items unsellable until pulled (waste) |
+| `world.ts` | `SimWorld.runDay(day, plans)`: morning visits, then customers; tracks sales, missed purchases, waste and stock-out periods |
+| `history.ts` | The fixed refill schedule (`fixedSchedulePlans`). The seed replays 60 days with it; it's also the A8 baseline |
+| `planner.ts` | `NightPlanner` interface + `ruleBasedPlanner` stand-in (until Viktor's agent plugs in) |
+| `benchmark.ts` | A8: both strategies from the same snapshot, same customers, same stops per day |
+
+Demand is a pure function of the day, so reruns and both benchmark strategies see identical customers. `SIM_TODAY` (default 2026-10-10) is the last day of history; fast-forward continues from there.
+
+### Data layer (`src/lib/data/`), used by routes and agent tools
+
+| File | What |
+| --- | --- |
+| `sim-clock.ts` | `getSimToday()`: the app's "today" is the simulated day (`SimState`), not the real date |
+| `stock.ts` | A4: stock batches, `consumeStock` (a sale), `completeVisit` (a stop), per-slot stock with `emptySince` |
+| `forecast.ts` | A5: weekday baseline from 4 weeks, corrected for stock-outs (`StockOut` periods) |
+| `fleet.ts` | A6: every dashboard query, returning `api-types.ts` shapes; alerts |
+| `cash.ts` | A9: cash box vs fiscal memory per collection (2 machines have deliberate faults) |
+| `fast-forward.ts` | A7: N simulated days with the night planner; stores runs, orders, visits, sales, stock |
+
+**Benchmark result so far (honest):** with the rule-based stand-in and the same stops per day, the agent matches the fixed schedule on missed sales and cuts expired food ~17% over 28 days. Machine capacity is the binding limit for this fleet; spreading stops evenly or using fewer stops made it worse (tested). `npm run sim:benchmark -- 28` reruns it in memory.
 
 ### API contract
 
@@ -73,6 +105,9 @@ Next.js 16 App Router + TypeScript, Prisma 7 (with `@prisma/adapter-pg`) on Supa
 - [x] Schema, initial migration applied to Supabase
 - [x] API contract + mock endpoints, sale event format
 - [x] Telegram bot created; token and chat ids in Todor's `.env`
-- [ ] Database password reset + connection strings shared with the team; `npx prisma migrate resolve --applied 20261010000000_init` run once
-- [ ] Vercel project (Viktor imports the repo, since it's under his GitHub account)
+- [x] Database connected; demo data seeded (A1–A3)
+- [x] Stock model, forecast, real API, fast-forward, benchmark, cash check (A4–A9)
+- [ ] Connection strings shared with Viktor and Kalin
+- [x] Vercel project `vending-agent` (Todor's account, region fra1): https://vending-agent-pi.vercel.app. Deployed from the CLI (`vercel deploy --prod`); not git-linked, because the repo is under Viktor's GitHub
+- [ ] Vercel environment variables (paste `.env` under Settings → Environment Variables, add `NEXT_PUBLIC_USE_MOCK=false`, redeploy)
 - [ ] Claude API key, Resend key, demo Gmail inbox

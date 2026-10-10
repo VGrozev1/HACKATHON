@@ -49,8 +49,9 @@ export interface SlotStock {
   productName: string;
   capacity: number;
   quantity: number;
-  nextExpiry: ISODate | null; // earliest batch expiry in this slot
-  stockOut: boolean;
+  nextExpiry: ISODate | null; // earliest unexpired batch in this slot
+  stockOut: boolean; // nothing sellable left
+  emptySince: ISODate | null; // when it ran out (last sale or last batch expiring); null if not empty
 }
 
 export interface MachineDetail extends MachineSummary {
@@ -172,8 +173,9 @@ export interface RunNightResponse {
 // ─── POST /api/sim/fast-forward?days=7 · GET /api/benchmark ──────────────────
 
 export interface StrategyResult {
-  stockOuts: number; // slot-hours empty while demand existed
-  expiredUnits: number;
+  stockOuts: number; // purchases missed because the slot was empty
+  expiredUnits: number; // units pulled after expiring
+  visits: number; // stocker visits used (same budget for both strategies)
   lostRevenue: number;
   wastedCost: number;
 }
