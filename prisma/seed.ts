@@ -25,6 +25,8 @@ function supplierEmail(tag: string): string {
 async function wipe() {
   // Children before parents.
   await db.simState.deleteMany();
+  await db.suggestion.deleteMany();
+  await db.warehouseStock.deleteMany();
   await db.stockOut.deleteMany();
   await db.purchaseOrderLine.deleteMany();
   await db.purchaseOrder.deleteMany();
@@ -125,6 +127,44 @@ async function main() {
   const stockOuts = world.stockOutIntervals();
   await db.stockOut.createMany({ data: stockOuts });
   await db.simState.create({ data: { id: "singleton", today: SIM_TODAY } });
+
+  // Warehouse: room for about 3 weeks of what the fleet sells of each product
+  // (at least 100), starting about 1 week full, so the agent has room to order.
+  const soldPerProduct = new Map<string, number>();
+  for (const r of saleRows) soldPerProduct.set(r.productId, (soldPerProduct.get(r.productId) ?? 0) + 1);
+  const perDay = (id: string) => (soldPerProduct.get(id) ?? 0) / HISTORY_DAYS;
+  await db.$transaction(
+    PRODUCTS.map((p) =>
+      db.product.update({ where: { id: p.id }, data: { warehouseCapacity: Math.max(100, Math.ceil((perDay(p.id) * 21) / 50) * 50) } }),
+    ),
+  );
+  await db.warehouseStock.createMany({
+    data: PRODUCTS.map((p) => ({ productId: p.id, quantity: Math.round(perDay(p.id) * 7) })),
+  });
+
+  // Three example suggestions from "last night", grounded in the simulated data.
+  await db.suggestion.createMany({
+    data: [
+      {
+        id: "SUG-0001", runDate: SIM_TODAY, type: "extra_stock", machineId: "SOF-GYM-01", productId: "water-500", product: "Devin water 0.5 l",
+        suggestion: "Add a Saturday visit at Gym Lozenets to refill water before the weekend.",
+        reason: "Water in A1 and A2 ran out on each of the last four weekends; the gym is busiest 18:00–21:00.",
+        expectedEffect: "About 25 more bottles sold each weekend and no empty water slots on Sundays.",
+      },
+      {
+        id: "SUG-0002", runDate: SIM_TODAY, type: "product_swap", machineId: "SOF-OFF-10", productId: "salad-greek", product: "Greek salad",
+        suggestion: "Swap Greek salad in Boyana Office Park for a second chicken sandwich slot.",
+        reason: "Boyana is the quietest office; salads there expire more often than they sell out.",
+        expectedEffect: "Less expired food and more sales of the office's best-selling fresh item.",
+      },
+      {
+        id: "SUG-0003", runDate: SIM_TODAY, type: "price_change", machineId: "SOF-GYM-04", productId: "isotonic-500", product: "Isotonic drink 0.5 l", percentChange: 8,
+        suggestion: "Raise the isotonic drink at Gym Studentski Grad by 8% during the warm spell.",
+        reason: "A late warm spell is forecast for 13–16 October and isotonic drinks sell out there on hot evenings.",
+        expectedEffect: "Higher margin per bottle while demand is high, with little effect on volume.",
+      },
+    ],
+  });
 
   const slotDays = days.flatMap((d) => d.slotDays);
   const lost = slotDays.reduce((n, s) => n + s.lost, 0);

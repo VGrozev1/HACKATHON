@@ -227,3 +227,35 @@ async function forecastHistory(machineId: string, today: Day, days: number) {
     };
   });
 }
+
+/**
+ * The agent's forecast tool shape: per product (summed over its slots), for
+ * the next `days` days starting tomorrow. misses.ts reads exactly
+ * { machine_id, forecast: [{ product, avgDailySales }] }, so keep it stable.
+ */
+export async function agentForecast(machineId: string, today: Day, days: number) {
+  const from = addDays(today, 1);
+  const until = addDays(today, days);
+  const [baseline, slots] = await Promise.all([
+    computeBaseline(today, [machineId]),
+    db.slot.findMany({ where: { machineId }, include: { product: true }, orderBy: { code: "asc" } }),
+  ]);
+  const byProduct = new Map<string, { product: string; product_id: string; total: number }>();
+  for (const s of slots) {
+    const entry = byProduct.get(s.productId) ?? { product: s.product.name, product_id: s.productId, total: 0 };
+    entry.total += expectedUnits(baseline, s.id, from, until);
+    byProduct.set(s.productId, entry);
+  }
+  return {
+    machine_id: machineId,
+    days,
+    from,
+    until,
+    forecast: [...byProduct.values()].map((p) => ({
+      product: p.product,
+      product_id: p.product_id,
+      avgDailySales: round1(p.total / days),
+      expectedUnits: Math.round(p.total),
+    })),
+  };
+}

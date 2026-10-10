@@ -38,12 +38,13 @@ model Machine {
   investorId   String?
   createdAt    DateTime     @default(now())
 
-  investor  Investor?    @relation(fields: [investorId], references: [id])
-  slots     Slot[]
-  sales     SaleEvent[]
-  stock     StockLevel[]
-  visits    Visit[]
-  stockOuts StockOut[]
+  investor    Investor?    @relation(fields: [investorId], references: [id])
+  slots       Slot[]
+  sales       SaleEvent[]
+  stock       StockLevel[]
+  visits      Visit[]
+  stockOuts   StockOut[]
+  suggestions Suggestion[]
 }
 
 model Product {
@@ -61,6 +62,7 @@ model Product {
   sales      SaleEvent[]
   stock      StockLevel[]
   orderLines PurchaseOrderLine[]
+  warehouse  WarehouseStock?
 }
 
 model Slot {
@@ -168,17 +170,18 @@ enum PurchaseOrderStatus {
 }
 
 model PurchaseOrder {
-  id           String              @id @default(cuid())
-  supplierId   String
-  status       PurchaseOrderStatus @default(DRAFT)
-  total        Float
-  deliveryDate DateTime
-  explanation  String // agent's plain-language reason
-  agentRunId   String?
-  emailId      String? // Resend message id once sent
-  approvedAt   DateTime?
-  approvedBy   String? // Telegram user who tapped "approve"
-  createdAt    DateTime            @default(now())
+  id               String              @id @default(cuid())
+  supplierId       String
+  status           PurchaseOrderStatus @default(DRAFT)
+  total            Float
+  deliveryDate     DateTime
+  explanation      String // agent's plain-language reason
+  agentRunId       String?
+  emailId          String? // Resend message id once sent
+  approvedAt       DateTime?
+  approvedBy       String? // Telegram user who tapped "approve"
+  rejectionReasons String[]            @default([]) // REJECTED only: every rule the order broke
+  createdAt        DateTime            @default(now())
 
   supplier Supplier            @relation(fields: [supplierId], references: [id])
   agentRun AgentRun?           @relation(fields: [agentRunId], references: [id])
@@ -278,4 +281,54 @@ model SimState {
   today         String // "YYYY-MM-DD", the last day with sales
   lastBenchmark Json? // latest A8 result, served by GET /api/benchmark
   updatedAt     DateTime @updatedAt
+}
+
+// ─── Warehouse ───────────────────────────────────────────────────────────────
+
+// Units of each product in the central warehouse. Supplier orders put units in;
+// a stocker's "done" takes the loaded units out. The agent subtracts this from
+// what it needs before ordering, and orders can't exceed Product.warehouseCapacity.
+model WarehouseStock {
+  productId String   @id
+  quantity  Int
+  updatedAt DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+// ─── Suggestions ─────────────────────────────────────────────────────────────
+
+enum SuggestionType {
+  extra_stock
+  product_swap
+  price_change
+  visit_change
+}
+
+enum SuggestionStatus {
+  pending
+  accepted
+  rejected
+}
+
+// Ideas the agent raises for the manager. Never applied automatically:
+// accepting or rejecting only changes `status` and `decidedAt`.
+model Suggestion {
+  id             String           @id // "SUG-0001"
+  runDate        String // the night that raised it, "YYYY-MM-DD"
+  type           SuggestionType
+  machineId      String
+  productId      String?
+  product        String? // product name as shown
+  suggestion     String
+  reason         String
+  expectedEffect String
+  percentChange  Float? // price_change only, -15..15
+  status         SuggestionStatus @default(pending)
+  createdAt      DateTime         @default(now())
+  decidedAt      DateTime?
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
 }
