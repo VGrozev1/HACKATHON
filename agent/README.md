@@ -102,7 +102,14 @@ node test-tools.ts
 - Only `list_machines` and `get_stock` currently call Todor's real API
   (`USE_MOCK` unset); the rest of the tools are still mock-only pending the
   real endpoints.
-- The dashboard's "run night" button (`src/app/api/agent/run-night`) does not
-  yet call this agent's `runNight()` — that wiring is still outstanding.
+- The dashboard's "run night" button now spawns a real `node agent.ts`
+  process (`src/app/api/agent/run-night` → `src/app/api/agent/runs/[id]`,
+  reading `runs/<runId>.json` as it's written). It needs
+  `NEXT_PUBLIC_AGENT_LIVE=true` to be used instead of the scripted mock, and
+  only works where that Node process can spawn and outlive a child process
+  for a few minutes — true for `next dev`/`next start`, not guaranteed on
+  Vercel's serverless functions. The run's orders and visits aren't written
+  to the app's database yet, so the dashboard's Orders/Route views won't
+  show them after a real run — only the live steps and final summary do.
 - `misses.ts` simulates "actual" sales (random variance around the forecast)
   because Todor's API doesn't expose per-product daily actuals yet.

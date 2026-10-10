@@ -18,6 +18,7 @@ const systemPrompt = readFileSync(path.join(here, "prompt.md"), "utf-8");
 
 export type ToolStep = {
   step: number;
+  at: string;
   tool: string;
   input: unknown;
   output: unknown;
@@ -26,6 +27,9 @@ export type ToolStep = {
 
 export type RunResult = {
   date: string;
+  status: "RUNNING" | "SUCCEEDED" | "FAILED";
+  startedAt: string;
+  finishedAt: string | null;
   summary: string;
   orders: PurchaseOrder[];
   suggestions: Suggestion[];
@@ -34,11 +38,17 @@ export type RunResult = {
 
 const MAX_STEPS = 25;
 
+// Set by whoever starts a run (e.g. the dashboard's run-night route) so it can
+// find this run's file by a known id instead of guessing a timestamp. Falls
+// back to a plain date-based name when run straight from the command line.
+const runId = process.env.AGENT_RUN_ID;
+
 export async function runNight(
   date: string,
   onStep?: (step: ToolStep) => void,
 ): Promise<RunResult> {
   const client = new Anthropic();
+  const startedAt = new Date().toISOString();
 
   const misses = await getYesterdaysMisses(new Date());
   const missesText = formatMisses(misses);
@@ -56,76 +66,96 @@ export async function runNight(
   let summary = "";
   let step = 0;
 
-  while (true) {
-    step++;
-    if (step > MAX_STEPS) {
-      summary = `Stopped after ${MAX_STEPS} steps without finishing.`;
-      break;
-    }
+  // Rebuilt and written to disk after every tool call (status RUNNING), so a
+  // caller polling the run file from outside this process (e.g. the
+  // dashboard's run-night route) can show live progress, not just the final
+  // result.
+  const snapshot = (status: RunResult["status"], finishedAt: string | null): RunResult => ({
+    date,
+    status,
+    startedAt,
+    finishedAt,
+    summary,
+    orders: purchaseOrders.slice(ordersStartIndex),
+    suggestions: suggestions.slice(suggestionsStartIndex),
+    steps,
+  });
 
-    const response = await client.messages.create({
-      model: "claude-sonnet-5",
-      max_tokens: 4096,
-      system: systemPrompt,
-      tools,
-      messages,
-    });
-
-    messages.push({ role: "assistant", content: response.content });
-
-    if (response.stop_reason !== "tool_use") {
-      const textParts: string[] = [];
-      for (const block of response.content) {
-        if (block.type === "text") {
-          textParts.push(block.text);
-        }
-      }
-      summary = textParts.join("\n");
-      break;
-    }
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const block of response.content) {
-      if (block.type !== "tool_use") continue;
-
-      toolCallCount++;
-      let output: unknown;
-      let isError = false;
-      try {
-        output = await runTool(block.name, block.input);
-      } catch (err) {
-        // A tool throwing is a bug in the tool, not a reason to crash the
-        // whole night's run — turn it into a tool result Claude can read
-        // and react to, same as any other error-shaped result.
-        isError = true;
-        output = { error: err instanceof Error ? err.message : String(err) };
+  try {
+    while (true) {
+      step++;
+      if (step > MAX_STEPS) {
+        summary = `Stopped after ${MAX_STEPS} steps without finishing.`;
+        break;
       }
 
-      const record: ToolStep = {
-        step: toolCallCount,
-        tool: block.name,
-        input: block.input,
-        output,
-        isError,
-      };
-      steps.push(record);
-      onStep?.(record);
-
-      toolResults.push({
-        type: "tool_result",
-        tool_use_id: block.id,
-        content: JSON.stringify(output),
-        is_error: isError,
+      const response = await client.messages.create({
+        model: "claude-sonnet-5",
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools,
+        messages,
       });
-    }
 
-    messages.push({ role: "user", content: toolResults });
+      messages.push({ role: "assistant", content: response.content });
+
+      if (response.stop_reason !== "tool_use") {
+        const textParts: string[] = [];
+        for (const block of response.content) {
+          if (block.type === "text") {
+            textParts.push(block.text);
+          }
+        }
+        summary = textParts.join("\n");
+        break;
+      }
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const block of response.content) {
+        if (block.type !== "tool_use") continue;
+
+        toolCallCount++;
+        let output: unknown;
+        let isError = false;
+        try {
+          output = await runTool(block.name, block.input);
+        } catch (err) {
+          // A tool throwing is a bug in the tool, not a reason to crash the
+          // whole night's run — turn it into a tool result Claude can read
+          // and react to, same as any other error-shaped result.
+          isError = true;
+          output = { error: err instanceof Error ? err.message : String(err) };
+        }
+
+        const record: ToolStep = {
+          step: toolCallCount,
+          at: new Date().toISOString(),
+          tool: block.name,
+          input: block.input,
+          output,
+          isError,
+        };
+        steps.push(record);
+        onStep?.(record);
+
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: block.id,
+          content: JSON.stringify(output),
+          is_error: isError,
+        });
+      }
+
+      messages.push({ role: "user", content: toolResults });
+      await saveRun(snapshot("RUNNING", null));
+    }
+  } catch (err) {
+    summary = err instanceof Error ? err.message : String(err);
+    await saveRun(snapshot("FAILED", new Date().toISOString()));
+    throw err;
   }
 
-  const orders = purchaseOrders.slice(ordersStartIndex);
-  const suggestionsThisRun = suggestions.slice(suggestionsStartIndex);
-  const run: RunResult = { date, summary, orders, suggestions: suggestionsThisRun, steps };
-
+  const run = snapshot("SUCCEEDED", new Date().toISOString());
   await saveRun(run);
 
   return run;
@@ -135,8 +165,7 @@ async function saveRun(run: RunResult): Promise<string> {
   const runsDir = path.join(here, "runs");
   await mkdir(runsDir, { recursive: true });
 
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const filePath = path.join(runsDir, `${run.date}_${timestamp}.json`);
+  const filePath = path.join(runsDir, `${runId ?? `${run.date}_${run.startedAt.replace(/[:.]/g, "-")}`}.json`);
   await writeFile(filePath, JSON.stringify(run, null, 2));
   return filePath;
 }
