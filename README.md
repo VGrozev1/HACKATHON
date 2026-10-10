@@ -41,6 +41,8 @@ Branches are `<name>/<topic>`. Merge into `main` through pull requests. Pull `ma
 | `npm run db:seed` | Seed the demo fleet (A2) |
 | `npm run db:studio` | Browse the database in the browser |
 
+**First time only, once `.env` has the database strings (one person):** `npx prisma migrate resolve --applied 20261010000000_init`. The schema was applied directly in Supabase, and this tells Prisma it is already there. Without it, the next `db:migrate` would offer to wipe the database.
+
 ## Accounts and keys (S1)
 
 These are created by hand once. The person in the second column creates the account and shares the key with the team privately.
@@ -48,7 +50,7 @@ These are created by hand once. The person in the second column creates the acco
 | Service | Who | Where | Goes into `.env` |
 | --- | --- | --- | --- |
 | GitHub repo | done | github.com/VGrozev1/HACKATHON | — |
-| Supabase (dev project) | Todor | supabase.com → New project (EU region) | `DATABASE_URL`, `DIRECT_URL` |
+| Supabase (dev project) | done | project `vending-agent-dev` (ref `wswjqtipgwtjdsnxqvcu`, Frankfurt); schema already applied. Todor: Project Settings → Database → Reset password, then the **Connect** button → ORMs → Prisma for both strings | `DATABASE_URL`, `DIRECT_URL` |
 | Vercel | Kalin | vercel.com → Import the GitHub repo | add all `.env` values under Project → Settings → Environment Variables |
 | Claude API | Viktor | console.anthropic.com → API keys | `ANTHROPIC_API_KEY` |
 | Telegram bot | Viktor | message @BotFather in Telegram → `/newbot` | `TELEGRAM_BOT_TOKEN` |
