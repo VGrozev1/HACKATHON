@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RunResult } from "./agent.ts";
+import { apiGet } from "./api.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const runsDir = path.join(here, "runs");
@@ -37,18 +38,24 @@ async function findPreviousRunFile(before: Date): Promise<string | null> {
   return best?.file ?? null;
 }
 
-// Stands in for actual per-product daily sales, which Todor's API doesn't
-// expose yet (GET /api/machines/:id/sales only returns per-machine daily
-// totals, not a per-product breakdown). Real sales vary day to day, so
-// this applies a random swing around the forecast to make misses — and
-// eventually, correcting them — possible to demo.
-function simulateActualSales(forecastPerDay: number): number {
-  const swing = 0.5 + Math.random() * 1.5; // 50%-200% of the average
-  return Math.round(forecastPerDay * swing);
+type ForecastStepOutput = {
+  machine_id: string;
+  from: string; // the day forecast() projected from — what "actual" means here
+  forecast: { product: string; avgDailySales: number }[];
+};
+
+async function actualUnitsSold(machineId: string, date: string): Promise<Map<string, number>> {
+  const res = await apiGet<{ products: { product: string; units: number }[] }>(
+    `/api/machines/${encodeURIComponent(machineId)}/sales/products?date=${date}`,
+  );
+  return new Map(res.products.map((p) => [p.product, p.units]));
 }
 
-// Reads the previous run's forecast() calls, simulates what actually sold
-// that day, and returns the 3 biggest misses (by absolute size).
+// Reads the previous run's forecast() calls and compares each product's
+// forecast rate against what actually sold on the day it was forecasting,
+// returning the 3 biggest misses (by absolute size). Skips a machine
+// gracefully if its actuals can't be fetched — this is a "nice to have"
+// correction, not worth failing the whole run over.
 export async function getYesterdaysMisses(before: Date): Promise<Miss[]> {
   const previousFile = await findPreviousRunFile(before);
   if (!previousFile) return [];
@@ -59,12 +66,19 @@ export async function getYesterdaysMisses(before: Date): Promise<Miss[]> {
   const misses: Miss[] = [];
   for (const step of previousRun.steps) {
     if (step.tool !== "forecast" || step.isError) continue;
-    const output = step.output as {
-      machine_id: string;
-      forecast: { product: string; avgDailySales: number }[];
-    };
+    const output = step.output as ForecastStepOutput;
+    if (!output?.from || !Array.isArray(output.forecast)) continue;
+
+    let sold: Map<string, number>;
+    try {
+      sold = await actualUnitsSold(output.machine_id, output.from);
+    } catch (err) {
+      console.error(`Could not fetch actual sales for ${output.machine_id} on ${output.from}:`, err);
+      continue;
+    }
+
     for (const line of output.forecast) {
-      const actual = simulateActualSales(line.avgDailySales);
+      const actual = sold.get(line.product) ?? 0;
       misses.push({
         machineId: output.machine_id,
         product: line.product,
