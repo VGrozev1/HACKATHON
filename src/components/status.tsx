@@ -101,3 +101,26 @@ export function OfflineBadge({ className }: { className?: string }) {
 }
 
 export const severityRank: Record<Alert["severity"], number> = { critical: 0, warning: 1, info: 2 };
+
+/** Why the order guardrail rejected an order, as a short list (rejected orders only). */
+export function RejectionReasons({ reasons, className }: { reasons?: string[]; className?: string }) {
+  if (!reasons?.length) return null;
+  return (
+    <div className={cn("rounded-xl border border-crit/30 bg-crit-soft px-4 py-3", className)}>
+      <p className="text-sm font-bold tracking-wide text-crit uppercase">Rejected by the guardrail</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-base">
+        {reasons.map((r) => (
+          <li key={r}>{r}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Awaiting approval first, rejected last, otherwise newest first. */
+export const orderStatusRank: Record<OrderStatus, number> = {
+  waiting_for_approval: 0,
+  sent_automatically: 1,
+  approved: 2,
+  rejected: 3,
+};

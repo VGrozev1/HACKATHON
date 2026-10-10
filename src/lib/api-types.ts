@@ -113,6 +113,7 @@ export interface PurchaseOrder {
   lines: PurchaseOrderLine[];
   machineIds: string[]; // machines this order restocks
   agentRunId: string | null;
+  rejectionReasons?: string[]; // REJECTED only: why the order guardrail (B5) blocked it
   createdAt: ISODate;
 }
 

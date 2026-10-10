@@ -67,6 +67,8 @@ export interface PurchaseOrder {
   lines: { product: string; quantity: number; unitCost: number }[];
   machineIds: string[];
   explanation: string;
+  /** Why the order guardrail rejected it (rejected orders only). */
+  rejectionReasons?: string[];
 }
 
 export interface Visit {

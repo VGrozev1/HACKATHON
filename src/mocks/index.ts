@@ -176,6 +176,23 @@ export const mockOrders: PurchaseOrder[] = [
     agentRunId: "run_demo_1",
     createdAt: "2026-10-10T01:12:30Z",
   },
+  {
+    id: "po_demo_3",
+    supplierId: "sup-drinks",
+    supplierName: "Sofia Beverages Ltd",
+    status: "REJECTED",
+    total: 299.6,
+    deliveryDate: "2026-10-11",
+    explanation: "First drinks order of the night; the guardrail blocked it and the agent retried with less water.",
+    lines: [
+      { productId: "water-500", productName: "Devin water 0.5 l", quantity: 600, unitCost: 0.32 },
+      { productId: "redbull-250", productName: "Red Bull 250 ml", quantity: 72, unitCost: 1.05 },
+    ],
+    machineIds: ["SOF-GYM-01", "SOF-GYM-05"],
+    agentRunId: "run_demo_1",
+    createdAt: "2026-10-10T01:11:10Z",
+    rejectionReasons: ["600 × Devin water 0.5 l is above the warehouse capacity of 500"],
+  },
 ];
 
 export const mockVisits: Visit[] = [

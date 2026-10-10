@@ -15,7 +15,6 @@ import type {
   SuggestionStatus,
   AgentRun,
   AgentStep,
-  AgentStepType,
   Alert,
   BenchmarkResult,
   ForecastPoint,
@@ -145,6 +144,7 @@ function fromOrder(o: Contract.PurchaseOrder): PurchaseOrder {
     lines: o.lines.map((l) => ({ product: l.productName, quantity: l.quantity, unitCost: l.unitCost })),
     machineIds: o.machineIds,
     explanation: o.explanation,
+    rejectionReasons: o.rejectionReasons,
   };
 }
 
@@ -174,26 +174,89 @@ function describe(value: unknown): string | undefined {
   return undefined;
 }
 
-const stepType: Record<Contract.AgentStep["type"], AgentStepType> = {
-  thought: "thinking",
-  tool_call: "tool_call",
-  tool_result: "tool_result",
-  decision: "decision",
-  error: "guardrail",
+/** Plain-language names for Viktor's agent tools (agent/tools.ts). */
+const TOOL_LABEL: Record<string, string> = {
+  list_machines: "Listing the machines",
+  get_stock: "Reading stock",
+  forecast: "Forecasting demand",
+  plan_route: "Planning the route",
+  create_purchase_order: "Placing a purchase order",
+  notify_stocker: "Sending load lists to the stocker",
+  get_weather: "Checking the weather",
+  get_holidays: "Checking public holidays",
+  check_alerts: "Checking for alerts",
+  create_suggestion: "Raising a suggestion",
 };
 
-function fromStep(s: Contract.AgentStep, i: number): AgentStep {
-  const type = stepType[s.type];
-  const fallbackTitle =
-    type === "tool_call" ? `Calling ${s.tool}` : type === "tool_result" ? `${s.tool} returned` : "Step";
-  return {
-    id: `step-${i}`,
-    timestamp: s.at,
-    type,
-    tool: s.tool,
-    title: s.text ?? fallbackTitle,
-    detail: type === "tool_call" ? describe(s.input) : describe(s.output),
-  };
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
+const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+const eur = (n: number) => `€${Math.round(n)}`;
+
+function describeInput(tool: string | undefined, input: unknown): string | undefined {
+  if (!isObj(input)) return describe(input);
+  if (tool === "create_purchase_order") {
+    const lines = Array.isArray(input.lines) ? input.lines.length : undefined;
+    return [str(input.supplier) ?? str(input.supplierId), lines !== undefined ? `${lines} line${lines === 1 ? "" : "s"}` : undefined].filter(Boolean).join(": ");
+  }
+  const machine = str(input.machineId) ?? str(input.machine_id);
+  if (machine) return machine;
+  return describe(input);
+}
+
+/** Turns one tool output into a readable card: orders and suggestions become decisions or guardrails. */
+function resultStep(id: string, at: string, tool: string | undefined, output: unknown, isError: boolean): AgentStep {
+  const base = { id, timestamp: at, tool };
+  if (isObj(output) && (isError || str(output.error))) {
+    return { ...base, type: "guardrail", title: `${TOOL_LABEL[tool ?? ""] ?? tool} failed`, detail: str(output.error) };
+  }
+  if (isObj(output) && str(output.status) && (num(output.totalEur) ?? num(output.total)) !== undefined) {
+    const total = eur((num(output.totalEur) ?? num(output.total))!);
+    const supplier = str(output.supplier) ?? str(output.supplierName) ?? "the supplier";
+    const reasons = Array.isArray(output.reasons) ? output.reasons.filter((r): r is string => typeof r === "string") : [];
+    const status = str(output.status)!.toLowerCase();
+    if (status === "rejected") {
+      return { ...base, type: "guardrail", title: `Order ${total} to ${supplier} rejected${reasons[0] ? `: ${reasons[0]}` : ""}`, detail: reasons.slice(1).join(" ") || undefined };
+    }
+    if (status === "awaiting_approval") {
+      return { ...base, type: "guardrail", title: `Order ${total} to ${supplier} exceeds the €300 limit: waiting for approval`, detail: str(output.reason) };
+    }
+    return { ...base, type: "decision", title: `Ordered ${total} from ${supplier}: sent automatically`, detail: str(output.reason) };
+  }
+  if (isObj(output) && str(output.suggestion)) {
+    return { ...base, type: "decision", title: `Suggestion for ${str(output.machineName) ?? str(output.machineId)}: ${str(output.suggestion)}`, detail: str(output.reason) };
+  }
+  return { ...base, type: "tool_result", title: `${TOOL_LABEL[tool ?? ""] ?? tool ?? "Step"}: done`, detail: describe(output) };
+}
+
+/**
+ * One contract step → one or two screen steps. A tool_call that already carries its
+ * output (how Viktor's runNight() reports steps) becomes the call plus its result card.
+ */
+function fromStep(s: Contract.AgentStep, i: number): AgentStep[] {
+  const id = `step-${i}`;
+  switch (s.type) {
+    case "thought":
+      return [{ id, timestamp: s.at, type: "thinking", title: s.text ?? "Thinking" }];
+    case "decision":
+      return [{ id, timestamp: s.at, type: "decision", title: s.text ?? "Decision" }];
+    case "error":
+      return [{ id, timestamp: s.at, type: "guardrail", title: s.text ?? "Something went wrong", detail: describe(s.output) }];
+    case "tool_result":
+      return [resultStep(id, s.at, s.tool, s.output, false)];
+    case "tool_call": {
+      const call: AgentStep = {
+        id,
+        timestamp: s.at,
+        type: "tool_call",
+        tool: s.tool,
+        title: s.text ?? TOOL_LABEL[s.tool ?? ""] ?? `Calling ${s.tool}`,
+        detail: describeInput(s.tool, s.input),
+      };
+      return s.output === undefined ? [call] : [call, resultStep(`${id}-r`, s.at, s.tool, s.output, false)];
+    }
+  }
 }
 
 // ─── Backup data ─────────────────────────────────────────────────────────────
@@ -377,7 +440,7 @@ async function realRunNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
   const started = Date.now();
   for (;;) {
     run = await http<Contract.AgentRun>(`/api/agent/runs/${encodeURIComponent(runId)}`);
-    run.steps.slice(seen).forEach((s, i) => onStep(fromStep(s, seen + i)));
+    run.steps.slice(seen).forEach((s, i) => fromStep(s, seen + i).forEach(onStep));
     seen = run.steps.length;
     if (run.status !== "RUNNING") break;
     if (Date.now() - started > 5 * 60_000) throw new Error("The agent is taking longer than 5 minutes");
@@ -393,7 +456,7 @@ async function realRunNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
   return {
     id: run.id,
     date: run.runDate,
-    steps: run.steps.map(fromStep),
+    steps: run.steps.flatMap(fromStep),
     orders: orders.filter((o) => o.agentRunId === run.id).map(fromOrder),
     route: visits.map(fromVisit).sort((a, b) => a.order - b.order),
     summary: run.explanation ?? run.decisions.map((d) => d.summary).join(". "),
@@ -478,3 +541,6 @@ export async function respondToSuggestion(id: string, status: Exclude<Suggestion
   await sleep(500);
   suggestionStatus.set(id, status);
 }
+
+/** Contract steps → readable screen steps (exported for tests and for Viktor to check his output). */
+export const screenSteps = (steps: Contract.AgentStep[]): AgentStep[] => steps.flatMap(fromStep);
