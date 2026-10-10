@@ -1,8 +1,8 @@
-// GET /api/orders — purchase orders, newest first (C5). Stub: A6.
+// GET /api/orders — purchase orders, newest first (A6).
 import { connection } from "next/server";
-import { mockOrders } from "@/mocks";
+import { listOrders } from "@/lib/data/fleet";
 
 export async function GET() {
-  await connection(); // always run at request time, never prerender at build (live data)
-  return Response.json(mockOrders);
+  await connection(); // live data: never prerender at build
+  return Response.json(await listOrders());
 }

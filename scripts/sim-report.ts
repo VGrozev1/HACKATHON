@@ -8,7 +8,13 @@ import { sellable } from "../src/lib/sim/stock";
 
 const from = addDays(SIM_TODAY, -(HISTORY_DAYS - 1));
 const t0 = Date.now();
-const h = simulateFixedSchedule({ from, to: SIM_TODAY });
+const { world, days } = simulateFixedSchedule({ from, to: SIM_TODAY });
+const h = {
+  sales: days.flatMap((d) => d.sales),
+  visits: days.flatMap((d) => d.visits),
+  slotDays: days.flatMap((d) => d.slotDays),
+  stock: world.stock,
+};
 const ms = Date.now() - t0;
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
@@ -55,4 +61,4 @@ for (let i = 13; i >= 0; i--) {
 
 const end = new Date(`${SIM_TODAY}T23:59:59Z`);
 const empty = SLOTS.filter((s) => sellable(h.stock.get(s.id)!, end) === 0).length;
-console.log(`\nEnd state: ${empty}/${SLOTS.length} slots empty tonight`);
+console.log(`\nEnd state: ${empty}/${SLOTS.length} slots empty tonight; ${world.stockOutIntervals().length} stock-out periods recorded`);

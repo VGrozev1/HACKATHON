@@ -40,6 +40,9 @@ Branches are `<name>/<topic>`. Merge into `main` through pull requests. Pull `ma
 | `npm run db:migrate -- --name <change>` | Apply schema changes to the dev database and create a migration (commit it) |
 | `npm run db:seed` | Seed the demo fleet (A2) |
 | `npm run db:studio` | Browse the database in the browser |
+| `npm run sim:report` | 60-day simulation summary, no database |
+| `npm run sim:forecast-check` | Forecast vs the simulator's true demand |
+| `npm run sim:benchmark -- 7` | Agent vs fixed weekly order over N days, in memory (changes nothing) |
 
 **First time only, once `.env` has the database strings (one person):** `npx prisma migrate resolve --applied 20261010000000_init`. The schema was applied directly in Supabase, and this tells Prisma it is already there. Without it, the next `db:migrate` would offer to wipe the database.
 

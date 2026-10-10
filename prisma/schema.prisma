@@ -38,21 +38,22 @@ model Machine {
   investorId   String?
   createdAt    DateTime     @default(now())
 
-  investor   Investor?    @relation(fields: [investorId], references: [id])
-  slots      Slot[]
-  sales      SaleEvent[]
-  stock      StockLevel[]
-  visits     Visit[]
+  investor  Investor?    @relation(fields: [investorId], references: [id])
+  slots     Slot[]
+  sales     SaleEvent[]
+  stock     StockLevel[]
+  visits    Visit[]
+  stockOuts StockOut[]
 }
 
 model Product {
-  id                String  @id // e.g. "water-500"
+  id                String @id // e.g. "water-500"
   name              String // "Devin water 0.5 l"
   category          String // "drink" | "snack" | "fresh" ...
   cost              Float // what we pay the supplier per unit, €
   price             Float // what the customer pays, €
   shelfLifeDays     Int
-  warehouseCapacity Int     @default(500) // guardrail: never order above this
+  warehouseCapacity Int    @default(500) // guardrail: never order above this
   supplierId        String
 
   supplier   Supplier            @relation(fields: [supplierId], references: [id])
@@ -69,10 +70,11 @@ model Slot {
   productId String
   capacity  Int
 
-  machine Machine      @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  product Product      @relation(fields: [productId], references: [id])
-  sales   SaleEvent[]
-  stock   StockLevel[]
+  machine   Machine      @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  product   Product      @relation(fields: [productId], references: [id])
+  sales     SaleEvent[]
+  stock     StockLevel[]
+  stockOuts StockOut[]
 
   @@unique([machineId, code])
 }
@@ -124,6 +126,22 @@ model StockLevel {
   product Product @relation(fields: [productId], references: [id])
 
   @@index([machineId, slotId])
+}
+
+// A4: a period when a slot had nothing sellable (sold out, or its last batch
+// expired) until the next refill. endedAt is null while it's still empty. The
+// forecast (A5) uses these so empty days don't read as "nobody wanted it".
+model StockOut {
+  id        String    @id @default(cuid())
+  machineId String
+  slotId    String
+  startedAt DateTime
+  endedAt   DateTime?
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  slot    Slot    @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  @@index([slotId, startedAt])
 }
 
 // ─── Ordering ────────────────────────────────────────────────────────────────
@@ -198,6 +216,7 @@ model Visit {
   agentRunId        String?
   telegramMessageId String?
   doneAt            DateTime?
+  wastedUnits       Int         @default(0) // expired units pulled at this visit
 
   machine  Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
   agentRun AgentRun? @relation(fields: [agentRunId], references: [id])
@@ -248,4 +267,15 @@ model Investor {
   payoutValue Float
 
   machines Machine[]
+}
+
+// ─── Simulation clock ────────────────────────────────────────────────────────
+
+// One row (id "singleton"). The app's "today" is the simulated day, not the real
+// date, because fast-forward (A7) moves it on. Read it with getSimToday().
+model SimState {
+  id            String   @id @default("singleton")
+  today         String // "YYYY-MM-DD", the last day with sales
+  lastBenchmark Json? // latest A8 result, served by GET /api/benchmark
+  updatedAt     DateTime @updatedAt
 }

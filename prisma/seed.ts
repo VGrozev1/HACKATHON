@@ -24,6 +24,8 @@ function supplierEmail(tag: string): string {
 
 async function wipe() {
   // Children before parents.
+  await db.simState.deleteMany();
+  await db.stockOut.deleteMany();
   await db.purchaseOrderLine.deleteMany();
   await db.purchaseOrder.deleteMany();
   await db.visit.deleteMany();
@@ -80,11 +82,11 @@ async function main() {
   console.log(`  ${SUPPLIERS.length} suppliers, ${PRODUCTS.length} products, ${MACHINES.length} machines, ${SLOTS.length} slots`);
 
   // ── A3: history ──
-  const history = simulateFixedSchedule({ from, to: SIM_TODAY });
+  const { world, days } = simulateFixedSchedule({ from, to: SIM_TODAY });
   const slotById = new Map(SLOTS.map((s) => [s.id, s]));
 
-  const saleRows = history.sales.map((e) =>
-    toSaleEventRow(e, slotById.get(slotIdFor(e.MachineId, e.ProductSelection))!),
+  const saleRows = days.flatMap((d) =>
+    d.sales.map((e) => toSaleEventRow(e, slotById.get(slotIdFor(e.MachineId, e.ProductSelection))!)),
   );
   for (let i = 0; i < saleRows.length; i += CHUNK) {
     await db.saleEvent.createMany({ data: saleRows.slice(i, i + CHUNK) });
@@ -92,18 +94,20 @@ async function main() {
   }
   console.log();
 
+  const visits = days.flatMap((d) => d.visits);
   await db.visit.createMany({
-    data: history.visits.map((v, i) => ({
+    data: visits.map((v) => ({
       date: new Date(`${v.day}T00:00:00Z`),
-      routeOrder: (i % 10) + 1,
+      routeOrder: v.routeOrder,
       machineId: v.machineId,
       status: "DONE" as const,
       loadList: v.loadList,
       doneAt: v.at,
+      wastedUnits: v.wasted,
     })),
   });
 
-  const stockRows = [...history.stock.entries()].flatMap(([slotId, batches]) => {
+  const stockRows = [...world.stock.entries()].flatMap(([slotId, batches]) => {
     const slot = slotById.get(slotId)!;
     return batches
       .filter((b) => b.quantity > 0)
@@ -118,11 +122,16 @@ async function main() {
   });
   await db.stockLevel.createMany({ data: stockRows });
 
-  const lost = history.slotDays.reduce((n, s) => n + s.lost, 0);
-  const wasted = history.slotDays.reduce((n, s) => n + s.wasted, 0);
-  console.log(`  ${history.visits.length} visits, ${stockRows.length} stock batches`);
+  const stockOuts = world.stockOutIntervals();
+  await db.stockOut.createMany({ data: stockOuts });
+  await db.simState.create({ data: { id: "singleton", today: SIM_TODAY } });
+
+  const slotDays = days.flatMap((d) => d.slotDays);
+  const lost = slotDays.reduce((n, s) => n + s.lost, 0);
+  const wasted = slotDays.reduce((n, s) => n + s.wasted, 0);
+  console.log(`  ${visits.length} visits, ${stockRows.length} stock batches, ${stockOuts.length} stock-outs`);
   console.log(`  fixed schedule: ${lost} purchases lost to stock-outs, ${wasted} units wasted`);
-  console.log(`Done. Products in use: ${new Set(SLOTS.map((s) => s.productId)).size}/${productById.size}`);
+  console.log(`Done. Sim clock set to ${SIM_TODAY}. Products in use: ${new Set(SLOTS.map((s) => s.productId)).size}/${productById.size}`);
 }
 
 main()

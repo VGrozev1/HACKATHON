@@ -1,10 +1,12 @@
-// POST /api/orders/:id/approve — approve an order over €300 (dashboard or Telegram). Stub: B5/B6.
+// POST /api/orders/:id/approve — approve an order waiting for approval (over the
+// auto-approve limit). Sending the email afterwards is B7; the Telegram button (B6)
+// calls approveOrder() too.
 import type { NextRequest } from "next/server";
-import { mockOrders } from "@/mocks";
+import { approveOrder } from "@/lib/data/fleet";
 
 export async function POST(_req: NextRequest, ctx: RouteContext<"/api/orders/[id]/approve">) {
   const { id } = await ctx.params;
-  const order = mockOrders.find((o) => o.id === id);
+  const order = await approveOrder(id);
   if (!order) return Response.json({ error: "Order not found" }, { status: 404 });
-  return Response.json({ ...order, status: "APPROVED" });
+  return Response.json(order);
 }

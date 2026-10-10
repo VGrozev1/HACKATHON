@@ -89,10 +89,10 @@ export function mockMachineDetail(id: string): MachineDetail | undefined {
     lastVisit: "2026-10-08T07:30:00Z",
     nextVisit: "2026-10-11T07:30:00Z",
     slots: [
-      { slotId: `${id}-A1`, code: "A1", productId: "water-500", productName: "Devin water 0.5 l", capacity: 24, quantity: 0, nextExpiry: null, stockOut: true },
-      { slotId: `${id}-A2`, code: "A2", productId: "redbull-250", productName: "Red Bull 250 ml", capacity: 20, quantity: 7, nextExpiry: "2027-03-01T00:00:00Z", stockOut: false },
-      { slotId: `${id}-B1`, code: "B1", productId: "protein-bar", productName: "Protein bar 50 g", capacity: 15, quantity: 9, nextExpiry: "2026-12-20T00:00:00Z", stockOut: false },
-      { slotId: `${id}-C2`, code: "C2", productId: "sandwich-chicken", productName: "Chicken sandwich", capacity: 12, quantity: 6, nextExpiry: "2026-10-11T00:00:00Z", stockOut: false },
+      { slotId: `${id}-A1`, code: "A1", productId: "water-500", productName: "Devin water 0.5 l", capacity: 24, quantity: 0, nextExpiry: null, stockOut: true, emptySince: "2026-10-10T15:10:00Z" },
+      { slotId: `${id}-A2`, code: "A2", productId: "redbull-250", productName: "Red Bull 250 ml", capacity: 20, quantity: 7, nextExpiry: "2027-03-01T00:00:00Z", stockOut: false, emptySince: null },
+      { slotId: `${id}-B1`, code: "B1", productId: "protein-bar", productName: "Protein bar 50 g", capacity: 15, quantity: 9, nextExpiry: "2026-12-20T00:00:00Z", stockOut: false, emptySince: null },
+      { slotId: `${id}-C2`, code: "C2", productId: "sandwich-chicken", productName: "Chicken sandwich", capacity: 12, quantity: 6, nextExpiry: "2026-10-11T00:00:00Z", stockOut: false, emptySince: null },
     ],
   };
 }
@@ -231,8 +231,8 @@ export const mockAgentRun: AgentRun = {
 export const mockBenchmark: Benchmark = {
   from: "2026-10-03",
   until: "2026-10-10",
-  agent: { stockOuts: 6, expiredUnits: 4, lostRevenue: 31.5, wastedCost: 6.6 },
-  fixedWeeklyOrder: { stockOuts: 29, expiredUnits: 22, lostRevenue: 164.2, wastedCost: 36.3 },
+  agent: { stockOuts: 6, expiredUnits: 4, visits: 41, lostRevenue: 31.5, wastedCost: 6.6 },
+  fixedWeeklyOrder: { stockOuts: 29, expiredUnits: 22, visits: 42, lostRevenue: 164.2, wastedCost: 36.3 },
   daily: series(7, 4, 1).map((d, i) => ({ day: d.day, agentStockOuts: i % 2, fixedStockOuts: 3 + (i % 3) })),
 };
 

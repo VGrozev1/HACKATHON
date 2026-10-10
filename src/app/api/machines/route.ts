@@ -1,8 +1,8 @@
-// GET /api/machines — fleet overview (C2). Stub: replace with real query in A6.
+// GET /api/machines — fleet overview with stock, today's sales and alerts (A6).
 import { connection } from "next/server";
-import { mockMachines } from "@/mocks";
+import { listMachines } from "@/lib/data/fleet";
 
 export async function GET() {
-  await connection(); // always run at request time, never prerender at build (live data)
-  return Response.json(mockMachines);
+  await connection(); // live data: never prerender at build
+  return Response.json(await listMachines());
 }

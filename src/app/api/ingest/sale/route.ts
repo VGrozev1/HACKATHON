@@ -2,6 +2,7 @@
 // The simulator can post here too; a real machine's reader webhook would point here.
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { consumeStock } from "@/lib/data/stock";
 import { ReaderSaleEventSchema, slotIdFor, toSaleEventRow } from "@/lib/sale-event";
 
 export async function POST(req: NextRequest) {
@@ -16,10 +17,9 @@ export async function POST(req: NextRequest) {
 
   const row = toSaleEventRow(event, slot);
   // Readers retry; the transaction id makes this idempotent.
-  const sale = await db.saleEvent.upsert({
-    where: { externalId: row.externalId },
-    create: row,
-    update: {},
-  });
+  const existing = await db.saleEvent.findUnique({ where: { externalId: row.externalId } });
+  if (existing) return Response.json({ id: existing.id }, { status: 200 });
+  const sale = await db.saleEvent.create({ data: row });
+  await consumeStock(slot.id, row.occurredAt); // A4: the vend took one unit out of the slot
   return Response.json({ id: sale.id }, { status: 201 });
 }
