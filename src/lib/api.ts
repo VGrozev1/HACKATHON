@@ -3,6 +3,7 @@
 //
 //   NEXT_PUBLIC_USE_MOCK=false             use the real endpoints (default: mocks)
 //   NEXT_PUBLIC_API_BASE_URL=https://...   where they live (default: this app's own /api)
+//   NEXT_PUBLIC_AGENT_LIVE=true            use the real agent run for Run night (once B1 is live)
 //
 // Real mode speaks the team contract (src/lib/api-types.ts, api.md) and converts it
 // into the view models in src/types.ts, so screens never see backend shapes.
@@ -32,11 +33,13 @@ import { alertsFor, machineSeedById, machineSeeds, slotsFor, stockPercentFor } f
 import { forecastFor, salesFor } from "@/mocks/ui/sales";
 import { pastOrders, tonightsOrders } from "@/mocks/ui/orders";
 import { agentScript, agentSummary, tonightsRoute } from "@/mocks/ui/agent";
-import { benchmarkResult, investorStatementFor } from "@/mocks/ui/investor";
-import { profitWeeksFor, suggestionsFor } from "@/mocks/ui/owner";
+import { benchmarkResult } from "@/mocks/ui/investor";
+import { profitWeeksFromSales, statementFromSales, suggestionsFrom } from "@/lib/insights";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+/** The real agent run endpoints (Viktor, B1) are live. Until then Run night uses the scripted run. */
+export const AGENT_LIVE = !USE_MOCK && process.env.NEXT_PUBLIC_AGENT_LIVE === "true";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -343,8 +346,11 @@ export function approveOrder(id: string): Promise<PurchaseOrder> {
  * POST /api/agent/run-night, then follow the run (GET /api/agent/runs/:id once a second)
  * and hand each new step to `onStep` as it arrives. Resolves with the finished run.
  * Falls back to the scripted run only if nothing has streamed yet, so steps never repeat.
+ * Until Viktor's agent (B1) replaces the stub endpoints, the scripted run is used even in
+ * real mode; set NEXT_PUBLIC_AGENT_LIVE=true once it's live.
  */
 export function runNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
+  if (!AGENT_LIVE) return mockRunNight(onStep);
   let streamed = 0;
   const counting = (s: AgentStep) => {
     streamed++;
@@ -441,42 +447,30 @@ export function fastForward(days = 7): Promise<BenchmarkResult> {
   );
 }
 
-// ─── Investor ────────────────────────────────────────────────────────────────
+// ─── Investor and owner portal ───────────────────────────────────────────────
+// Computed here from the machine's sales and stock (src/lib/insights.ts), so they work
+// on the real API without extra endpoints. Todor's GET /api/investors/:id/statement is
+// keyed by investor and covers only their first machine, so the per-machine pages
+// don't use it.
 
-/**
- * GET /api/investor/:machineId?model=A
- * Not in api.md yet: the contract has GET /api/investors/:id/statement (by investor).
- * Todor needs to add this per-machine route, or this function maps the other one.
- */
-export function getInvestorStatement(machineId: string, model: "A" | "B" | "C"): Promise<InvestorStatement> {
-  return withBackup(
-    "getInvestorStatement",
-    () => http<InvestorStatement>(`/api/investor/${encodeURIComponent(machineId)}?model=${model}`),
-    async () => {
-      await latency();
-      if (!machineSeedById.has(machineId)) throw new Error(`Machine ${machineId} not found`);
-      return investorStatementFor(machineId, model);
-    },
-  );
+/** One machine's statement for last month, under payout model A, B or C. */
+export async function getInvestorStatement(machineId: string, model: "A" | "B" | "C"): Promise<InvestorStatement> {
+  return statementFromSales(machineId, await getSales(machineId, 60), model);
 }
 
-// ─── Owner portal ────────────────────────────────────────────────────────────
-// Not in api.md yet: needs GET /api/machines/:id/profit, GET /api/machines/:id/suggestions
-// and POST /api/suggestions/:id (Todor / Viktor). Until then both modes use the mocks.
-
-const suggestionStatus = new Map<string, SuggestionStatus>();
-
-/** Weekly revenue, costs and profit for one machine, last 8 weeks. */
+/** Weekly sales, costs and profit for one machine, last 8 weeks. */
 export async function getProfitHistory(machineId: string): Promise<ProfitWeek[]> {
-  await latency();
-  if (!machineSeedById.has(machineId)) throw new Error(`Machine ${machineId} not found`);
-  return profitWeeksFor(machineId);
+  return profitWeeksFromSales(await getSales(machineId, 60));
 }
+
+// The owner's answers live in the browser for now; the agent reading them needs a
+// backend endpoint (Viktor), e.g. POST /api/suggestions/:id { status }.
+const suggestionStatus = new Map<string, SuggestionStatus>();
 
 /** What the agent suggests to this machine's owner: prices, swaps, visits, repairs. */
 export async function getSuggestions(machineId: string): Promise<AgentSuggestion[]> {
-  await latency();
-  return suggestionsFor(machineId).map((s) => ({ ...s, status: suggestionStatus.get(s.id) ?? s.status }));
+  const [machine, slots, sales] = await Promise.all([getMachine(machineId), getStock(machineId), getSales(machineId, 28)]);
+  return suggestionsFrom({ machine, slots, sales }).map((s) => ({ ...s, status: suggestionStatus.get(s.id) ?? s.status }));
 }
 
 /** The owner accepts or dismisses a suggestion; accepted ones go to the operator and the agent. */

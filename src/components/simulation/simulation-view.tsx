@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CalendarDays, FastForward, RotateCcw, TrendingDown } from "lucide-react";
 import type { BenchmarkResult } from "@/types";
-import { fastForward } from "@/lib/api";
+import { fastForward, USE_MOCK } from "@/lib/api";
 import { addDays, DEMO_NOW, dayKey, formatDate, formatEURRound } from "@/lib/format";
 import { useCountUp } from "@/hooks/use-count-up";
 import { cn } from "@/lib/utils";
@@ -30,7 +30,8 @@ export function SimulationView() {
   // Step the visible day counter while the simulation runs; it waits on the last day until results arrive.
   useEffect(() => {
     if (phase !== "running") return;
-    const t = setInterval(() => setDay((d) => Math.min(DAYS, d + 1)), 550);
+    // The real simulation takes ~2–4 s per day (api.md, A7); the mock answers in about 4 s total.
+    const t = setInterval(() => setDay((d) => Math.min(DAYS, d + 1)), USE_MOCK ? 550 : 3000);
     return () => clearInterval(t);
   }, [phase]);
 
