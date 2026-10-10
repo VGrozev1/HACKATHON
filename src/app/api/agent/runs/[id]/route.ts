@@ -31,11 +31,11 @@ type AgentRunFile = {
   steps: AgentToolStep[];
 };
 
+// One contract step per tool call, input and output together — src/lib/api.ts's
+// fromStep() expands this into a call card plus a result/guardrail card itself,
+// using each tool's output.error to tell a failure from a normal result.
 function toAgentSteps(steps: AgentToolStep[]): AgentStep[] {
-  return steps.flatMap((s) => [
-    { at: s.at, type: "tool_call" as const, tool: s.tool, input: s.input },
-    { at: s.at, type: s.isError ? ("error" as const) : ("tool_result" as const), tool: s.tool, output: s.output },
-  ]);
+  return steps.map((s) => ({ at: s.at, type: "tool_call" as const, tool: s.tool, input: s.input, output: s.output }));
 }
 
 function toDecisions(run: AgentRunFile): AgentDecision[] {

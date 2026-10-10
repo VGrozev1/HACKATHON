@@ -1,19 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
-import {
-  machines,
-  stock,
-  avgDailySales,
-  warehouse,
-  openingHours,
-  hoursSinceLastSale,
-  todaySales,
-  cashReports,
-  type Coordinates,
-} from "./mock-data.ts";
+import { avgDailySales, warehouse, suppliers, products, type Coordinates } from "./mock-data.ts";
 import {
   checkOrder,
   checkSuggestion,
   type OrderStatus,
+  type OrderCatalog,
   type SuggestionType,
 } from "./guardrails.ts";
 import { sendSupplierEmail } from "./email.ts";
@@ -22,7 +13,12 @@ import { apiGet } from "./api.ts";
 // Type-only — erased at runtime, so this never creates an actual
 // dependency on Todor's code. It just keeps our shapes honest to the
 // contract in api.md as he fills in the real endpoints.
-import type { MachineSummary, MachineDetail, SlotStock } from "../src/lib/api-types.ts";
+import type { MachineSummary, MachineDetail, MachineForecast, SlotStock, Alert } from "../src/lib/api-types.ts";
+// Real (not type-only) import: these are pure functions with no imports of
+// their own (no Prisma, no DB) — the same deterministic weather/holiday
+// calendar driving the simulated economy's actual demand, so the agent
+// reasons about the same world its forecast numbers come from.
+import { weatherOn, holidayOn, addDays } from "../src/lib/sim/calendar.ts";
 
 // ---- Tool descriptions (what we show Claude) -----------------------------
 
@@ -184,8 +180,9 @@ export const tools: Anthropic.Tool[] = [
     name: "check_alerts",
     description:
       "Check every machine for operational problems: offline (no sale in 6+ hours during opening time), " +
-      "sudden zero sales on a normally-popular product (possible jammed slot), or cash collected differing " +
-      "from the fiscal report by over €2. Detection is deterministic — you explain the likely cause of each.",
+      "sudden zero sales on a normally-popular product (possible jammed slot), cash collected differing " +
+      "from the fiscal report by over €2, an empty slot (stock-out), or food about to expire. Detection is " +
+      "deterministic; some alerts already include a likely cause, otherwise explain one yourself.",
     input_schema: {
       type: "object",
       properties: {},
@@ -282,87 +279,46 @@ let pendingSuggestionsTonight = 0;
 
 // ---- Tool implementations -------------------------------------------------
 
-// USE_MOCK=1 shapes mock-data.ts to look exactly like the real API would,
-// so every tool behaves the same to Claude regardless of which is active.
-function mockListMachines(): MachineSummary[] {
-  return machines.map((m) => {
-    const slots = stock[m.id] ?? [];
-    const stockPercent = slots.length
-      ? Math.round((slots.reduce((sum, s) => sum + s.count / s.capacity, 0) / slots.length) * 100)
-      : 0;
-    return {
-      id: m.id,
-      name: m.name,
-      locationType: m.type.toUpperCase() as MachineSummary["locationType"],
-      city: "Sofia",
-      lat: m.location.lat,
-      lng: m.location.lng,
-      online: true,
-      stockPercent,
-      salesToday: { units: 0, revenue: 0 }, // not tracked in mock data
-      alerts: [],
-    };
-  });
-}
-
+// Always real now — list_machines/get_stock no longer have a USE_MOCK
+// branch. Keeping two implementations of the same real data stopped being
+// worth it once /api/machines covered this; USE_MOCK still applies to
+// create_purchase_order/create_suggestion's catalogs (suppliers, products,
+// warehouse — no real endpoint for those yet).
 async function listMachines(): Promise<MachineSummary[]> {
-  if (process.env.USE_MOCK === "1") {
-    return mockListMachines();
-  }
   return apiGet<MachineSummary[]>("/api/machines");
 }
 
-// Slugifies a product name into something that looks like Todor's
-// productId convention (e.g. "water-500" in api.md's own example).
-function productIdFor(productName: string): string {
-  return productName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
-function mockGetStock(machineId: string): SlotStock[] | null {
-  const machineStock = stock[machineId];
-  if (!machineStock) return null;
-  return machineStock.map((entry, i) => ({
-    slotId: `${machineId}-A${i + 1}`,
-    code: `A${i + 1}`,
-    productId: productIdFor(entry.product),
-    productName: entry.product,
-    capacity: entry.capacity,
-    quantity: entry.count,
-    nextExpiry: null,
-    stockOut: entry.count === 0,
-  }));
-}
-
 async function getStock(machineId: string): Promise<SlotStock[] | { error: string }> {
-  if (process.env.USE_MOCK === "1") {
-    const slots = mockGetStock(machineId);
-    if (!slots) {
-      return { error: `Unknown machine ID "${machineId}"` };
-    }
-    return slots;
-  }
   const detail = await apiGet<MachineDetail>(`/api/machines/${encodeURIComponent(machineId)}`);
   return detail.slots;
 }
 
-function forecast(machineId: string, days: number) {
-  const machineStock = stock[machineId];
-  if (!machineStock) {
-    return { error: `Unknown machine ID "${machineId}"` };
-  }
+// Days between two "YYYY-MM-DD" strings (at least 1, so a same-day window
+// never divides by zero).
+function dayCount(from: string, until: string): number {
+  return Math.max(1, Math.round((Date.parse(until) - Date.parse(from)) / 86400000));
+}
+
+async function forecast(machineId: string, days: number) {
   if (!Number.isInteger(days) || days < 1 || days > 7) {
     return { error: `"days" must be an integer between 1 and 7, got ${days}` };
   }
 
-  const salesForMachine = avgDailySales[machineId] ?? {};
-  const forecastLines = machineStock.map((entry) => {
-    const daily = salesForMachine[entry.product] ?? 0;
+  // Todor's real forecast (A5/B4) is a baseline over "until the next visit",
+  // not a fixed N-day window — convert it to a per-day rate, then project
+  // that rate over the days Claude actually asked for. It only has slot ids
+  // and product ids, so join against the machine detail for product names.
+  const [detail, fc] = await Promise.all([
+    apiGet<MachineDetail>(`/api/machines/${encodeURIComponent(machineId)}`),
+    apiGet<MachineForecast>(`/api/machines/${encodeURIComponent(machineId)}/forecast`),
+  ]);
+  const productNameBySlot = new Map(detail.slots.map((s) => [s.slotId, s.productName]));
+  const windowDays = dayCount(fc.from, fc.until);
+  const forecastLines = fc.slots.map((s) => {
+    const daily = s.baseline / windowDays;
     return {
-      product: entry.product,
-      avgDailySales: daily,
+      product: productNameBySlot.get(s.slotId) ?? s.productId,
+      avgDailySales: Math.round(daily * 100) / 100,
       expectedUnits: Math.round(daily * days),
     };
   });
@@ -378,17 +334,24 @@ function distance(a: Coordinates, b: Coordinates): number {
   return Math.sqrt(dLat * dLat + dLng * dLng);
 }
 
-function planRoute(machineIds: string[]) {
-  const stops = [];
+async function planRoute(machineIds: string[]) {
+  // list_machines already resolves to the real fleet when it's available —
+  // reusing it here means plan_route gets real coordinates for free, with
+  // no separate mock/real branch of its own.
+  const fleet = await listMachines();
+  const byId = new Map(fleet.map((m) => [m.id, { lat: m.lat, lng: m.lng }]));
+
+  const stops: { id: string; location: Coordinates }[] = [];
   for (const id of machineIds) {
-    const machine = machines.find((m) => m.id === id);
-    if (!machine) {
+    const location = byId.get(id);
+    if (!location) {
       return { error: `Unknown machine ID "${id}"` };
     }
-    stops.push(machine);
+    stops.push({ id, location });
   }
 
-  // Nearest-neighbour: start at the warehouse, repeatedly jump to whichever
+  // Nearest-neighbour: start at the warehouse (no real endpoint for this —
+  // it's one fixed address, not fleet data), repeatedly jump to whichever
   // remaining stop is closest to wherever we currently are.
   const remaining = [...stops];
   const route: string[] = [];
@@ -424,41 +387,77 @@ function formatLocalDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-async function getWeather() {
-  // DEMO_HEATWAVE=1 skips the real API call so a demo can reliably show the
-  // "hot day -> more cold drinks" behavior without waiting for real weather.
-  if (process.env.DEMO_HEATWAVE === "1") {
-    const today = new Date();
-    return [0, 1, 2].map((offset) => {
-      const date = new Date(today);
-      date.setDate(date.getDate() + offset);
-      return { date: formatLocalDate(date), maxTempC: 35, rainMm: 0 };
-    });
-  }
-
+// The simulated day (SimState.today) driving the app's actual demand
+// numbers — not the real calendar date, which can drift from it once
+// fast-forward has moved the sim clock on. Falls back to the real local
+// date if /api/health doesn't return one (USE_MOCK=1, or the API's down)
+// — every caller still gets a usable date, just logged so the fallback
+// isn't silently wrong forever.
+let cachedSimToday: string | undefined;
+export async function getSimToday(): Promise<string> {
+  if (process.env.USE_MOCK === "1") return formatLocalDate(new Date());
+  if (cachedSimToday) return cachedSimToday;
   try {
-    const url =
-      `https://api.open-meteo.com/v1/forecast?latitude=${SOFIA_LOCATION.lat}&longitude=${SOFIA_LOCATION.lng}` +
-      `&daily=temperature_2m_max,precipitation_sum&timezone=Europe%2FSofia&forecast_days=3`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      return { error: `Open-Meteo request failed with status ${response.status}` };
-    }
-    const data = await response.json();
-
-    return data.daily.time.map((date: string, i: number) => ({
-      date,
-      maxTempC: data.daily.temperature_2m_max[i],
-      rainMm: data.daily.precipitation_sum[i],
-    }));
+    const health = await apiGet<{ today?: string }>("/api/health");
+    if (!health.today) throw new Error("GET /api/health has no \"today\" field");
+    cachedSimToday = health.today;
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
+    console.error("Could not read the simulated day from /api/health, falling back to the real date:", err);
+    cachedSimToday = formatLocalDate(new Date());
   }
+  return cachedSimToday;
 }
 
-// Fixed-date Bulgarian public holidays (month is 1-indexed). Orthodox Easter
-// and the holidays tied to it (Good Friday, Easter Sunday/Monday) move every
-// year and are NOT included here — add their dates by hand each year.
+async function getWeather() {
+  const today = await getSimToday();
+  const days = [1, 2, 3].map((offset) => addDays(today, offset));
+
+  // DEMO_HEATWAVE=1 skips the real weather source so a demo can reliably
+  // show the "hot day -> more cold drinks" behavior on demand.
+  if (process.env.DEMO_HEATWAVE === "1") {
+    return days.map((date) => ({ date, maxTempC: 35, rainMm: 0 }));
+  }
+
+  if (process.env.USE_MOCK === "1") {
+    // No simulated economy to stay consistent with in mock mode — ask
+    // the real Sofia weather instead, just for demo flavor.
+    try {
+      const url =
+        `https://api.open-meteo.com/v1/forecast?latitude=${SOFIA_LOCATION.lat}&longitude=${SOFIA_LOCATION.lng}` +
+        `&daily=temperature_2m_max,precipitation_sum&timezone=Europe%2FSofia&forecast_days=3`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        return { error: `Open-Meteo request failed with status ${response.status}` };
+      }
+      const data = await response.json();
+      return data.daily.time.map((date: string, i: number) => ({
+        date,
+        maxTempC: data.daily.temperature_2m_max[i],
+        rainMm: data.daily.precipitation_sum[i],
+      }));
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  // Real mode: the same deterministic weather driving the simulated
+  // economy's actual demand (src/lib/sim/calendar.ts), not real Sofia
+  // weather — otherwise the agent would reason about a day that has
+  // nothing to do with the forecast numbers it's also reading. rainMm is
+  // approximated from the simulated world's rainy/not-rainy flag, which
+  // doesn't model a precise rainfall amount.
+  return days.map((date) => {
+    const w = weatherOn(date);
+    return { date, maxTempC: w.tMaxC, rainMm: w.rainy ? 5 : 0 };
+  });
+}
+
+// Fixed-date Bulgarian public holidays (month is 1-indexed), used only
+// under USE_MOCK=1. Orthodox Easter and the holidays tied to it (Good
+// Friday, Easter Sunday/Monday) move every year and are NOT included here
+// — add their dates by hand each year. Real mode uses holidayOn() from
+// the simulated calendar instead (below), which already applies
+// weekend-observed shifts for the days it covers.
 const FIXED_HOLIDAYS: { month: number; day: number; name: string }[] = [
   { month: 1, day: 1, name: "New Year's Day" },
   { month: 3, day: 3, name: "Liberation Day" },
@@ -472,7 +471,7 @@ const FIXED_HOLIDAYS: { month: number; day: number; name: string }[] = [
   { month: 12, day: 26, name: "Second Day of Christmas" },
 ];
 
-function getHolidays() {
+function mockGetHolidays() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const horizon = new Date(today);
@@ -493,11 +492,21 @@ function getHolidays() {
     .map((c) => ({ date: formatLocalDate(c.date), name: c.name }));
 }
 
-const OFFLINE_HOURS_THRESHOLD = 6;
-const ZERO_SALES_DAILY_THRESHOLD = 10;
-const CASH_MISMATCH_THRESHOLD_EUR = 2;
+async function getHolidays() {
+  if (process.env.USE_MOCK === "1") return mockGetHolidays();
 
-export type AlertKind = "OFFLINE" | "ZERO_SALES" | "CASH_MISMATCH";
+  // Real mode: the simulated world's own holiday calendar (src/lib/sim/calendar.ts),
+  // over the same today..today+7 window as the mock version above.
+  const today = await getSimToday();
+  return Array.from({ length: 8 }, (_, i) => addDays(today, i))
+    .map((date) => ({ date, name: holidayOn(date) }))
+    .filter((h): h is { date: string; name: string } => h.name !== null);
+}
+
+// STOCK_OUT (a slot is empty right now) and EXPIRING (food about to go
+// off) are self-explanatory from their message, so there's no extra
+// "likely cause" reasoning needed for them.
+export type AlertKind = "OFFLINE" | "ZERO_SALES" | "CASH_MISMATCH" | "STOCK_OUT" | "EXPIRING";
 
 export type AlertFact = {
   machineId: string;
@@ -505,55 +514,18 @@ export type AlertFact = {
   message: string;
 };
 
-// Pure detection — every number here is a fact from (mock) data, not a
-// guess. The AI's job is to read these and explain the likely cause in
-// one sentence each; it never decides *whether* something is a problem.
-function checkAlerts(): AlertFact[] {
-  const alerts: AlertFact[] = [];
-  const currentHour = new Date().getHours();
+function withCause(alert: Alert): string {
+  return alert.likelyCause ? `${alert.message} (${alert.likelyCause})` : alert.message;
+}
 
-  for (const machine of machines) {
-    const hours = openingHours[machine.id];
-    const isOpenNow = hours ? currentHour >= hours.open && currentHour < hours.close : true;
-    const hoursAgo = hoursSinceLastSale[machine.id] ?? 0;
-
-    if (isOpenNow && hoursAgo >= OFFLINE_HOURS_THRESHOLD) {
-      alerts.push({
-        machineId: machine.id,
-        kind: "OFFLINE",
-        message: `${machine.name} (${machine.id}) hasn't recorded a sale in ${hoursAgo} hours, during its usual opening hours.`,
-      });
-    }
-
-    const todaysSalesForMachine = todaySales[machine.id] ?? {};
-    const averagesForMachine = avgDailySales[machine.id] ?? {};
-    for (const [product, avgSales] of Object.entries(averagesForMachine)) {
-      const soldToday = todaysSalesForMachine[product] ?? 0;
-      if (avgSales >= ZERO_SALES_DAILY_THRESHOLD && soldToday === 0) {
-        alerts.push({
-          machineId: machine.id,
-          kind: "ZERO_SALES",
-          message: `${machine.name} (${machine.id}): "${product}" normally sells ~${avgSales}/day but sold 0 today.`,
-        });
-      }
-    }
-
-    const cash = cashReports[machine.id];
-    if (cash) {
-      const diff = Math.abs(cash.cashCollected - cash.fiscalReportTotal);
-      if (diff > CASH_MISMATCH_THRESHOLD_EUR) {
-        alerts.push({
-          machineId: machine.id,
-          kind: "CASH_MISMATCH",
-          message:
-            `${machine.name} (${machine.id}): cash collected (€${cash.cashCollected.toFixed(2)}) ` +
-            `differs from the fiscal report (€${cash.fiscalReportTotal.toFixed(2)}) by €${diff.toFixed(2)}.`,
-        });
-      }
-    }
-  }
-
-  return alerts;
+// Always real now — no USE_MOCK branch. /api/machines (A6) already
+// computes every alert kind server-side from real stock, sales and cash
+// data; there was never a faithful mock-only equivalent (mock-data.ts
+// only modeled 3 of the 5 real alert kinds, from thresholds that had no
+// real counterpart — opening hours, hour-of-last-sale, cash reports).
+async function checkAlerts(): Promise<AlertFact[]> {
+  const fleet = await listMachines();
+  return fleet.flatMap((m) => m.alerts.map((a) => ({ machineId: m.id, kind: a.kind, message: withCause(a) })));
 }
 
 async function createPurchaseOrder(
@@ -561,7 +533,10 @@ async function createPurchaseOrder(
   lines: PurchaseOrderLine[],
   reason: string,
 ): Promise<PurchaseOrder> {
-  const { status, totalEur, reasons } = checkOrder(supplier, lines);
+  // No real endpoint yet for the product/supplier catalog or warehouse
+  // capacity — mock-data.ts is the only source either mode has for these.
+  const catalog: OrderCatalog = { suppliers, products, warehouse, avgDailySales };
+  const { status, totalEur, reasons } = checkOrder(supplier, lines, catalog);
 
   const order: PurchaseOrder = {
     id: `PO-${String(nextOrderId++).padStart(4, "0")}`,
@@ -606,14 +581,23 @@ async function createSuggestion(
   expectedEffect: string,
   percentChange: number | undefined,
 ): Promise<Suggestion> {
-  const check = checkSuggestion({ type, machineId, product, percentChange }, pendingSuggestionsTonight);
+  // One fetch of the real fleet (or mock, via list_machines' own branching)
+  // covers both the "does this machine exist" guardrail and its display name.
+  const fleet = await listMachines();
+  const machine = fleet.find((m) => m.id === machineId);
+  // Products have no real catalog yet — still mock-data.ts either way.
+  const check = checkSuggestion(
+    { type, machineId, product, percentChange },
+    pendingSuggestionsTonight,
+    { machines: fleet, products },
+  );
 
   const record: Suggestion = {
     id: `SUG-${String(nextSuggestionId++).padStart(4, "0")}`,
     runDate: formatLocalDate(new Date()),
     type,
     machineId,
-    machineName: machines.find((m) => m.id === machineId)?.name ?? machineId,
+    machineName: machine?.name ?? machineId,
     product,
     suggestion: suggestionText,
     reason,

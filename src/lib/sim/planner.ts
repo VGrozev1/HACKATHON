@@ -10,7 +10,7 @@
 // about *which* machines and *how much*, not about working harder.
 
 import { addDays, dayOfWeek, holidayOn, sofiaTime, weatherOn, type Day } from "./calendar";
-import { productById, slotsFor, type Category, type MachineDef } from "./fleet";
+import { productById, slotsFor, WAREHOUSE, type Category, type MachineDef } from "./fleet";
 import { FIXED_VISIT_DAYS } from "./history";
 import { sellable, type SlotStock } from "./stock";
 import { VISIT_HOUR, VISIT_MINUTE, type VisitPlan } from "./world";
@@ -50,7 +50,6 @@ export interface NightPlanner {
 
 // ─── Stand-in rules ──────────────────────────────────────────────────────────
 
-const DEPOT = { lat: 42.6977, lng: 23.3219 }; // warehouse near the centre
 const COVER_DAYS = 3; // fresh food: load enough for this many days at most
 const DURABLE_SHELF_LIFE = 30; // longer than this can't go off before it sells: fill to the top
 const FRESH_SAFETY = 1.4; // fresh food: the next stop may be days away
@@ -80,7 +79,7 @@ function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: numb
 export function routeOrder(machines: MachineDef[]): MachineDef[] {
   const left = [...machines];
   const route: MachineDef[] = [];
-  let here = DEPOT;
+  let here: { lat: number; lng: number } = WAREHOUSE;
   while (left.length) {
     left.sort((a, b) => distanceKm(here, a) - distanceKm(here, b));
     const next = left.shift()!;

@@ -1,17 +1,18 @@
-// A small fake world for the vending-machine agent to operate on.
-// Nothing here talks to a real database — it's all in-memory data the
-// tools in tools.ts read from (and, for purchase orders, write to).
+// What's left of the fake fleet, now that list_machines, get_stock,
+// forecast, plan_route, and check_alerts always call the real API (no
+// USE_MOCK branch anymore — see tools.ts). What remains here is mock-only
+// in BOTH modes, because there's no real source to switch to yet:
+//   - suppliers, products, warehouse — no real /api/products,
+//     /api/suppliers, or warehouse endpoint. create_purchase_order also
+//     has nowhere real to persist an order either way (only GET /api/orders
+//     and POST /api/orders/:id/approve exist, for orders that already
+//     exist). Needs a team discussion/new endpoints, not a tools.ts fix.
+//   - avgDailySales — feeds checkOrder's shelf-life math; no real
+//     per-product fleet-wide sales rate exists to use instead yet.
+// For list_machines/get_stock/forecast/plan_route/check_alerts testing
+// without a live API, see test-tools-live.ts instead of USE_MOCK.
 
 export type Coordinates = { lat: number; lng: number };
-
-export type MachineType = "gym" | "office" | "hospital";
-
-export type Machine = {
-  id: string;
-  name: string;
-  type: MachineType;
-  location: Coordinates;
-};
 
 export type Warehouse = {
   name: string;
@@ -33,12 +34,6 @@ export type Product = {
   shelfLifeDays: number;
 };
 
-export type StockEntry = {
-  product: string; // matches a Product.name below
-  count: number;
-  capacity: number;
-};
-
 // Approximate real-world coordinates around Sofia, so distances in
 // plan_route behave like a real delivery route would.
 export const warehouse: Warehouse = {
@@ -47,27 +42,6 @@ export const warehouse: Warehouse = {
   capacity: 2000,
   currentStock: 600,
 };
-
-export const machines: Machine[] = [
-  {
-    id: "GYM-01",
-    name: "Vitosha Gym",
-    type: "gym",
-    location: { lat: 42.6818, lng: 23.3188 },
-  },
-  {
-    id: "OFF-01",
-    name: "Business Park Office",
-    type: "office",
-    location: { lat: 42.6177, lng: 23.3801 },
-  },
-  {
-    id: "HOS-01",
-    name: "Pirogov Hospital",
-    type: "hospital",
-    location: { lat: 42.6762, lng: 23.3225 },
-  },
-];
 
 export const suppliers: Supplier[] = [
   { name: "Metro", email: "orders@metro-sofia.bg", minOrderEur: 150 },
@@ -83,37 +57,11 @@ export const products: Product[] = [
   { name: "Coffee to go", supplier: "Metro", costEur: 1.8, shelfLifeDays: 10 },
 ];
 
-// Current stock per slot, per machine.
-// GYM-01 is low on Water and Energy drink; OFF-01 is low on Sandwich and
-// Coffee to go; HOS-01 is comfortably stocked everywhere.
-export const stock: Record<string, StockEntry[]> = {
-  "GYM-01": [
-    { product: "Water 0.5l", count: 3, capacity: 20 },
-    { product: "Energy drink", count: 0, capacity: 12 },
-    { product: "Protein bar", count: 12, capacity: 15 },
-  ],
-  "OFF-01": [
-    { product: "Coffee to go", count: 2, capacity: 20 },
-    { product: "Sandwich", count: 1, capacity: 10 },
-    { product: "Water 0.5l", count: 15, capacity: 20 },
-  ],
-  "HOS-01": [
-    { product: "Water 0.5l", count: 18, capacity: 20 },
-    { product: "Protein bar", count: 10, capacity: 12 },
-    { product: "Sandwich", count: 7, capacity: 10 },
-  ],
-};
-
-// Average units sold per day, per product, per machine — used by forecast().
-// Three numbers here are deliberately tuned as demo signals:
-// - OFF-01's Water barely moves (would take ~50 days to sell a full
-//   20-unit slot — a classic "slow seller" tying up slot capacity).
-// - GYM-01's Energy drink sells fast enough relative to its 12-unit
-//   capacity that it reliably runs low again within a couple of days
-//   ("always sells out early"), independent of any weather/holiday effect.
-// - OFF-01's Coffee to go is a genuinely high-volume product (11/day) so
-//   check_alerts' "sudden zero" check (Step 12a) has a real >=10/day
-//   product to compare today's zero sales against.
+// Average units sold per day, per product, per machine — feeds checkOrder's
+// shelf-life guardrail math. Keyed by the mock machine IDs this data was
+// originally written for (GYM-01/OFF-01/HOS-01); it's summed across all
+// machines regardless of key, so it still works as a fleet-wide rate even
+// though real machine IDs look different (e.g. SOF-GYM-01).
 export const avgDailySales: Record<string, Record<string, number>> = {
   "GYM-01": {
     "Water 0.5l": 4.5,
@@ -130,42 +78,4 @@ export const avgDailySales: Record<string, Record<string, number>> = {
     "Protein bar": 1.5,
     "Sandwich": 2,
   },
-};
-
-// ---- Step 12a: data for check_alerts (the real API has no granular-enough
-// endpoint for any of this yet — hour-of-last-sale, per-product daily
-// actuals, and cash-vs-fiscal reconciliation are all mock-only for now) ---
-
-export type OpeningHours = { open: number; close: number }; // hour of day, 0-24, local time
-
-export const openingHours: Record<string, OpeningHours> = {
-  "GYM-01": { open: 6, close: 23 },
-  "OFF-01": { open: 8, close: 19 },
-  "HOS-01": { open: 0, close: 24 }, // hospital — effectively open round the clock
-};
-
-// Hours since each machine's last recorded sale. Demo signal: GYM-01 is
-// tuned to look offline (over the 6-hour threshold); the others look fine.
-export const hoursSinceLastSale: Record<string, number> = {
-  "GYM-01": 7,
-  "OFF-01": 1,
-  "HOS-01": 2,
-};
-
-// Units sold TODAY per product per machine. Demo signal: OFF-01's Coffee
-// to go (normally ~11/day) sold zero today — a classic jammed-slot sign.
-export const todaySales: Record<string, Record<string, number>> = {
-  "GYM-01": { "Water 0.5l": 5, "Energy drink": 4, "Protein bar": 2 },
-  "OFF-01": { "Coffee to go": 0, "Sandwich": 4, "Water 0.5l": 0 },
-  "HOS-01": { "Water 0.5l": 3, "Protein bar": 1, "Sandwich": 2 },
-};
-
-export type CashReport = { cashCollected: number; fiscalReportTotal: number };
-
-// Demo signal: OFF-01 is off by more than the €2 tolerance; the others
-// are exact or within tolerance.
-export const cashReports: Record<string, CashReport> = {
-  "GYM-01": { cashCollected: 42.5, fiscalReportTotal: 42.5 },
-  "OFF-01": { cashCollected: 58.3, fiscalReportTotal: 55.1 },
-  "HOS-01": { cashCollected: 30.0, fiscalReportTotal: 29.4 },
 };

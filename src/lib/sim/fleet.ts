@@ -173,6 +173,11 @@ export function slotsFor(machine: MachineDef): SlotDef[] {
 
 export const SLOTS: SlotDef[] = MACHINES.flatMap(slotsFor);
 
+// ─── Warehouse ───────────────────────────────────────────────────────────────
+
+/** Central warehouse in Sofia's eastern industrial zone: every route starts and ends here. */
+export const WAREHOUSE = { name: "Central Warehouse", lat: 42.6865, lng: 23.4017 };
+
 // ─── Investors (C7) ──────────────────────────────────────────────────────────
 
 export const INVESTORS = [
