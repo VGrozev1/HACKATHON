@@ -8,6 +8,7 @@ Logins for the investor portal at `/owner` (sign in at `/login`). Demo only: the
 | Vitosha Ventures | `vitosha` | `delta-amber-4108` | 1 | SOF-GYM-07 |
 | Serdika Holdings | `serdika` | `orbit-orbit-8122` | 4 | SOF-HOS-01, SOF-HOS-02, SOF-OFF-03, SOF-UNI-01 |
 | Iskar Invest | `iskar` | `falcon-maple-7502` | 3 | SOF-GYM-05, SOF-OFF-01, SOF-OFF-02 |
+| Mladost Partners | `mladost` | `delta-beacon-5615` | 3 | SOF-GYM-02, SOF-GYM-04, SOF-OFF-06 |
 
 - Each investor only sees their own machines; opening another machine's page sends them back to their list.
 - Passwords are stored as salted scrypt hashes in `src/mocks/investors.ts`. To change one, regenerate the hash (see the comment there) and update this table.

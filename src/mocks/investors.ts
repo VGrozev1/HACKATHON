@@ -70,5 +70,14 @@ export const investorAccounts: InvestorAccount[] = [
       "SOF-OFF-01",
       "SOF-OFF-02"
     ]
-  }
+  },
+  {
+    id: "inv-05",
+    name: "Mladost Partners",
+    username: "mladost",
+    passwordHash: "scrypt$5eafb7c19b79f10d726d50adc7bc5152$abfba0ee0d9d0fec3b4dc5f06ad21cd8c88426a609fd08ce316241edf3bbabfb",
+    payoutModel: "C",
+    payoutValue: 0.4,
+    machineIds: ["SOF-GYM-02", "SOF-GYM-04", "SOF-OFF-06"],
+  },
 ];
