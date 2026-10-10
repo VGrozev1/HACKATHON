@@ -9,7 +9,6 @@ import {
   todaySales,
   cashReports,
   type Coordinates,
-  type StockEntry,
 } from "./mock-data.ts";
 import {
   checkOrder,
@@ -23,7 +22,7 @@ import { apiGet } from "./api.ts";
 // Type-only — erased at runtime, so this never creates an actual
 // dependency on Todor's code. It just keeps our shapes honest to the
 // contract in api.md as he fills in the real endpoints.
-import type { MachineSummary } from "../src/lib/api-types.ts";
+import type { MachineSummary, MachineDetail, SlotStock } from "../src/lib/api-types.ts";
 
 // ---- Tool descriptions (what we show Claude) -----------------------------
 
@@ -313,12 +312,40 @@ async function listMachines(): Promise<MachineSummary[]> {
   return apiGet<MachineSummary[]>("/api/machines");
 }
 
-function getStock(machineId: string): StockEntry[] | { error: string } {
+// Slugifies a product name into something that looks like Todor's
+// productId convention (e.g. "water-500" in api.md's own example).
+function productIdFor(productName: string): string {
+  return productName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function mockGetStock(machineId: string): SlotStock[] | null {
   const machineStock = stock[machineId];
-  if (!machineStock) {
-    return { error: `Unknown machine ID "${machineId}"` };
+  if (!machineStock) return null;
+  return machineStock.map((entry, i) => ({
+    slotId: `${machineId}-A${i + 1}`,
+    code: `A${i + 1}`,
+    productId: productIdFor(entry.product),
+    productName: entry.product,
+    capacity: entry.capacity,
+    quantity: entry.count,
+    nextExpiry: null,
+    stockOut: entry.count === 0,
+  }));
+}
+
+async function getStock(machineId: string): Promise<SlotStock[] | { error: string }> {
+  if (process.env.USE_MOCK === "1") {
+    const slots = mockGetStock(machineId);
+    if (!slots) {
+      return { error: `Unknown machine ID "${machineId}"` };
+    }
+    return slots;
   }
-  return machineStock;
+  const detail = await apiGet<MachineDetail>(`/api/machines/${encodeURIComponent(machineId)}`);
+  return detail.slots;
 }
 
 function forecast(machineId: string, days: number) {
