@@ -1,5 +1,3 @@
-import { suppliers, products, warehouse, avgDailySales, machines } from "./mock-data.ts";
-
 export const AUTO_APPROVE_LIMIT_EUR = 300;
 
 export type OrderLine = { product: string; quantity: number };
@@ -12,9 +10,21 @@ export type OrderCheckResult = {
   reasons: string[];
 };
 
+// The catalogs checkOrder needs. None of these have a real endpoint yet
+// (no /api/products, /api/suppliers, or warehouse route) — the caller
+// (tools.ts) is where that's decided, so this file stays pure and doesn't
+// care whether its data came from mock-data.ts or somewhere real later.
+export type OrderCatalog = {
+  suppliers: { name: string; minOrderEur: number }[];
+  products: { name: string; supplier: string; costEur: number; shelfLifeDays: number }[];
+  warehouse: { capacity: number; currentStock: number };
+  // machineId -> product name -> average units sold per day.
+  avgDailySales: Record<string, Record<string, number>>;
+};
+
 // Sum of average daily sales for a product across every machine — how fast
 // the whole fleet could realistically sell through a batch of it.
-function totalDailySalesFor(productName: string): number {
+function totalDailySalesFor(avgDailySales: OrderCatalog["avgDailySales"], productName: string): number {
   let total = 0;
   for (const machineSales of Object.values(avgDailySales)) {
     total += machineSales[productName] ?? 0;
@@ -22,7 +32,8 @@ function totalDailySalesFor(productName: string): number {
   return total;
 }
 
-export function checkOrder(supplier: string, lines: OrderLine[]): OrderCheckResult {
+export function checkOrder(supplier: string, lines: OrderLine[], catalog: OrderCatalog): OrderCheckResult {
+  const { suppliers, products, warehouse, avgDailySales } = catalog;
   const reasons: string[] = [];
   let totalEur = 0;
   let totalQuantity = 0;
@@ -69,7 +80,7 @@ export function checkOrder(supplier: string, lines: OrderLine[]): OrderCheckResu
 
     totalEur += quantity * product.costEur;
 
-    const dailySales = totalDailySalesFor(productName);
+    const dailySales = totalDailySalesFor(avgDailySales, productName);
     const daysToSellThrough = dailySales > 0 ? quantity / dailySales : Infinity;
     if (daysToSellThrough >= product.shelfLifeDays) {
       reasons.push(
@@ -124,10 +135,19 @@ export type SuggestionCheckResult = {
   reasons: string[];
 };
 
+// Machines come from the real fleet list when one's available (tools.ts
+// decides); products still only exist in mock-data.ts — no real catalog yet.
+export type SuggestionCatalog = {
+  machines: { id: string }[];
+  products: { name: string }[];
+};
+
 export function checkSuggestion(
   input: SuggestionInput,
   pendingSuggestionsSoFarTonight: number,
+  catalog: SuggestionCatalog,
 ): SuggestionCheckResult {
+  const { machines, products } = catalog;
   const reasons: string[] = [];
 
   if (pendingSuggestionsSoFarTonight >= MAX_SUGGESTIONS_PER_NIGHT) {

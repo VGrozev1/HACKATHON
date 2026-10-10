@@ -1,6 +1,26 @@
-// A small fake world for the vending-machine agent to operate on.
-// Nothing here talks to a real database — it's all in-memory data the
-// tools in tools.ts read from (and, for purchase orders, write to).
+// A small fake world for the vending-machine agent to operate on, used when
+// USE_MOCK=1. tools.ts migrates to the real API one tool at a time (api.md);
+// as of now:
+//   - machines, stock          → real: list_machines, get_stock, forecast,
+//                                 plan_route, create_suggestion all call the
+//                                 real /api/machines endpoints when not mocked.
+//   - openingHours, hoursSinceLastSale, todaySales, cashReports
+//                               → mock-only, dead weight in real mode: the real
+//                                 /api/machines already returns richer alerts
+//                                 (OFFLINE/ZERO_SALES/CASH_MISMATCH/STOCK_OUT/
+//                                 EXPIRING) computed server-side. Kept only so
+//                                 check_alerts still has something to detect
+//                                 under USE_MOCK=1.
+//   - suppliers, products, warehouse
+//                               → mock-only in BOTH modes: there's no real
+//                                 /api/products, /api/suppliers, or warehouse
+//                                 endpoint yet, and create_purchase_order has
+//                                 nowhere real to persist an order either way
+//                                 (needs a team discussion, not a tools.ts fix).
+//   - avgDailySales             → mock-only in both modes: feeds the shelf-life
+//                                 math in guardrails.ts's checkOrder, which has
+//                                 no real per-product fleet-wide sales rate to
+//                                 use instead yet.
 
 export type Coordinates = { lat: number; lng: number };
 
