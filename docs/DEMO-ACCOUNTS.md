@@ -12,4 +12,4 @@ Logins for the investor portal at `/owner` (sign in at `/login`). Demo only: the
 
 - Each investor only sees their own machines; opening another machine's page sends them back to their list.
 - Passwords are stored as salted scrypt hashes in `src/mocks/investors.ts`. To change one, regenerate the hash (see the comment there) and update this table.
-- Sessions are signed with `AUTH_SECRET` (see `.env.example`). Without it, local development uses a built-in development secret; in production, login stays switched off until it's set.
+- Sessions are signed with `AUTH_SECRET` (see `.env.example`). Without it, the key is derived from `DATABASE_URL`, which every deployment already has; local development with neither uses a built-in development key.

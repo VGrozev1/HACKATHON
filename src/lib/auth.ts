@@ -31,10 +31,16 @@ const toPortal = ({ id, name, username, payoutModel, payoutValue, machineIds }: 
   machineIds,
 });
 
-/** AUTH_SECRET signs sessions. Local dev falls back to a fixed secret; production refuses. */
+/**
+ * The key that signs sessions. AUTH_SECRET when set. Otherwise it's derived from
+ * DATABASE_URL, a server-only secret every deployment already has; the HMAC with a
+ * fixed label keeps the two keys separate. Local dev without either uses a fixed dev key.
+ */
 function secret(): string | null {
   const s = process.env.AUTH_SECRET;
   if (s && s.length >= 16) return s;
+  const db = process.env.DATABASE_URL;
+  if (db && db.length >= 16) return createHmac("sha256", db).update("vendai-investor-session-v1").digest("base64url");
   if (process.env.NODE_ENV !== "production") return "vendai-dev-only-secret-do-not-deploy";
   return null;
 }
