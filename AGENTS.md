@@ -109,5 +109,6 @@ Demand is a pure function of the day, so reruns and both benchmark strategies se
 - [x] Stock model, forecast, real API, fast-forward, benchmark, cash check (A4–A9)
 - [ ] Connection strings shared with Viktor and Kalin
 - [x] Vercel project `vending-agent` (Todor's account, region fra1): https://vending-agent-pi.vercel.app. Deployed from the CLI (`vercel deploy --prod`); not git-linked, because the repo is under Viktor's GitHub
-- [ ] Vercel environment variables (paste `.env` under Settings → Environment Variables, add `NEXT_PUBLIC_USE_MOCK=false`, redeploy)
+- [x] Vercel environment variables set (including `NEXT_PUBLIC_USE_MOCK=false`)
+- **Deploying:** Vercel's free Hobby plan only deploys when the latest commit on `main` was made by Todor (the account owner); otherwise the deploy shows as BLOCKED. So Todor deploys with `vercel deploy --prod` from his machine right after one of his own commits lands on `main`.
 - [ ] Claude API key, Resend key, demo Gmail inbox
