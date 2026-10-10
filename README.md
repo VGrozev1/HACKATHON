@@ -8,7 +8,7 @@ Hackathon web app: an AI agent plans the nightly orders and restocking route for
 | Viktor (B) | AI agent and integrations | Agent loop and tools, guardrails, Telegram bot, supplier email |
 | Kalin (C) | Frontend and demo | Dashboard, "run night" and "fast-forward" views, investor view, pitch |
 
-**Key files:** [`api.md`](api.md) (API contract) · [`prisma/schema.prisma`](prisma/schema.prisma) (data model) · [`src/lib/api-types.ts`](src/lib/api-types.ts) (JSON shapes) · [`src/mocks/index.ts`](src/mocks/index.ts) (fake data) · [`src/lib/sale-event.ts`](src/lib/sale-event.ts) (sale event format)
+**Key files:** [`docs/PLAN.md`](docs/PLAN.md) (build plan and task ids) · [`api.md`](api.md) (API contract) · [`prisma/schema.prisma`](prisma/schema.prisma) (data model) · [`src/lib/api-types.ts`](src/lib/api-types.ts) (JSON shapes) · [`src/mocks/index.ts`](src/mocks/index.ts) (fake data) · [`src/lib/sale-event.ts`](src/lib/sale-event.ts) (sale event format)
 
 ## Get started (each person)
 

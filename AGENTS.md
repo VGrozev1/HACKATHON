@@ -10,13 +10,69 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Project: Vending AI Agent (hackathon)
 
-Read `README.md` (setup, who owns what) and `api.md` (API contract) first.
+An AI agent that plans the nightly orders and restocking route for 20 simulated vending machines in Sofia, messages the stocker on Telegram, and emails suppliers. 24-hour hackathon, three people.
 
-- **Stack:** Next.js 16 App Router + TypeScript, Prisma 7 on Supabase Postgres, Tailwind + shadcn/ui, Recharts, Claude API (`@anthropic-ai/sdk`), grammY (Telegram), Resend (email).
-- **Data model:** `prisma/schema.prisma`. After a schema change: `npm run db:migrate -- --name <change>` and commit the migration. Import the client only from `src/lib/db.ts`.
-- **API shapes:** `src/lib/api-types.ts` is the contract. Routes must return exactly these types; mocks live in `src/mocks/index.ts`. Change the type first, then the route.
-- **Sale events:** card-reader format in `src/lib/sale-event.ts` (S4). Don't change field names; they mirror real readers.
-- **Ownership:** Todor = `prisma/`, `src/lib/sim/`, data routes. Viktor = `src/lib/agent/`, `src/lib/integrations/`, `/api/agent`, `/api/telegram`. Kalin = `src/app/` pages and `src/components/`. Work on your own branch, merge via PR.
-- **Guardrails belong in code** (B5): the €300 auto-approve limit, approved suppliers, warehouse capacity and expiry checks live inside `create_purchase_order`, not only in the prompt.
-- **Safety:** only ever point the Supabase MCP at the dev project. Never commit `.env` or paste keys into chat.
-- Before pushing: `npm run typecheck && npm run lint && npm run build`.
+**Read first:**
+- `docs/PLAN.md`: the build plan. Every task id used in code and comments (S1–S4, A1–A9, B1–B9, C1–C9) is defined there, with dependencies, the timeline and the demo checklist ("Definition of done").
+- `api.md`: every endpoint, which task replaces each stub, and how the pieces call each other.
+- `README.md`: setup, scripts, accounts, branches.
+
+### Team and ownership
+
+| Person | Tasks | Owns |
+| --- | --- | --- |
+| Todor | A1–A9 (data, simulation, backend) | `prisma/`, `src/lib/sim/`, data routes in `src/app/api/` |
+| Viktor | B1–B9 (agent, integrations) | `src/lib/agent/`, `src/lib/integrations/`, `src/app/api/agent/`, `src/app/api/telegram/` |
+| Kalin | C1–C9 (frontend, demo) | `src/app/` pages, `src/components/` |
+
+Branches are `<name>/<topic>` (`todor/data`, `viktor/agent`, `kalin/frontend`); merge to `main` through PRs. Don't edit another person's area without telling them.
+
+### Stack
+
+Next.js 16 App Router + TypeScript, Prisma 7 (with `@prisma/adapter-pg`) on Supabase Postgres, Tailwind 4 + shadcn/ui, Recharts, Claude API (`@anthropic-ai/sdk`, model from `ANTHROPIC_MODEL`), grammY (Telegram), Resend (email), Vercel (hosting).
+
+### Database
+
+- **Schema:** `prisma/schema.prisma` is the source of truth (task S2). Its header comment lists the conventions: money is € as Float, times are UTC, ids are readable strings where we choose them.
+- **Live database:** Supabase project `vending-agent-dev` (ref `wswjqtipgwtjdsnxqvcu`, eu-central-1). The `init` migration is applied. It's a dev project only; nothing real lives there.
+- **Changing the schema:** edit `schema.prisma`, run `npm run db:migrate -- --name <change>`, commit the migration folder, and tell the team (it changes the API). Never edit an applied migration.
+- **Client:** import `db` from `src/lib/db.ts` only; never create another `PrismaClient`. The client is generated into `src/generated/prisma` (gitignored; `npm install` regenerates it).
+- **RLS** is on for every table with no policies. That blocks Supabase's public REST API on purpose; Prisma connects as the owner and is unaffected. New tables need `ALTER TABLE "X" ENABLE ROW LEVEL SECURITY;` added to their migration.
+- **Prisma 7 differs from older versions:** the connection URL lives in `prisma.config.ts`, not the schema; the generator is `prisma-client` with an explicit output. The skills in `.claude/skills/prisma-*` cover the details.
+
+### API contract
+
+- `src/lib/api-types.ts` holds the exact JSON shape of every endpoint. Routes must return these types. To change a shape: edit the type, then the mock in `src/mocks/index.ts`, then the route, then tell the team.
+- Every route in `src/app/api/` starts as a stub serving mocks; its header comment names the task that replaces it. Keep the response shape identical when replacing a stub.
+- With `cacheComponents` on, a GET route that reads no request data is prerendered at build time. Routes serving live data call `await connection()` from `next/server` first.
+- The agent's tools call the data functions in `src/lib` directly, not over HTTP.
+
+### Sale events (S4)
+
+`src/lib/sale-event.ts` defines the card-reader (Nayax/Vendon-style) transaction format. The simulator must emit exactly this shape, and `POST /api/ingest/sale` stores it. Don't rename its fields; they mirror real readers so real machines can plug in later.
+
+### Agent rules (Viktor's area, but everyone should know them)
+
+- **Guardrails belong in code** (B5): orders under €300 (`AUTO_APPROVE_LIMIT_EUR`) go out automatically, bigger ones wait for approval in Telegram. Only approved suppliers; never above `Product.warehouseCapacity`; never order stock that expires before it's likely to sell; price changes are suggestions only. These checks live inside `create_purchase_order`, not only in the prompt.
+- Log every step of a run to `AgentRun.steps`; the dashboard streams it.
+- Telegram: the bot sends load lists to `TELEGRAM_STOCKER_CHAT_ID` and approvals to `TELEGRAM_APPROVER_CHAT_ID`. Button taps arrive at `POST /api/telegram/webhook`, checked against `TELEGRAM_WEBHOOK_SECRET`.
+
+### Safety
+
+- The Supabase MCP in `.mcp.json` is scoped to the dev project. Never point any tool at another Supabase project; the same account holds unrelated production data.
+- Never commit `.env` or paste keys into chat; `.env.example` lists every variable.
+- Let Vercel deploy previews freely; promotion to production is done by a person.
+
+### Before pushing
+
+`npm run typecheck && npm run lint && npm run build`
+
+### Setup status (update as things land)
+
+- [x] Repo, app scaffold, dependencies, shadcn/ui
+- [x] Schema, initial migration applied to Supabase
+- [x] API contract + mock endpoints, sale event format
+- [x] Telegram bot created; token and chat ids in Todor's `.env`
+- [ ] Database password reset + connection strings shared with the team; `npx prisma migrate resolve --applied 20261010000000_init` run once
+- [ ] Vercel project (Viktor imports the repo, since it's under his GitHub account)
+- [ ] Claude API key, Resend key, demo Gmail inbox
