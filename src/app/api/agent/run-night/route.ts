@@ -17,7 +17,10 @@ export async function POST() {
   const runId = randomUUID();
   const agentDir = path.join(process.cwd(), "agent");
 
-  const child = spawn("node", ["--env-file=.env", "agent.ts"], {
+  // process.execPath (this Node binary) rather than the literal "node": the
+  // bundler statically analyses spawn("node", [...]) and tries to bundle the
+  // arguments as modules, which broke the build ("Can't resolve '--env-file=.env'").
+  const child = spawn(process.execPath, ["--env-file=.env", "agent.ts"], {
     cwd: agentDir,
     env: { ...process.env, AGENT_RUN_ID: runId },
     detached: true,
