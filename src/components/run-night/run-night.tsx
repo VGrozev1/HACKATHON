@@ -30,6 +30,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState } from "@/components/states";
 import { OrderStatusBadge, orderStatusRank, RejectionReasons } from "@/components/status";
 import { RouteMap } from "@/components/maps";
+import { SuggestionsCard } from "@/components/suggestions-card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -433,10 +434,11 @@ function Results({ run }: { run: AgentRun }) {
       </section>
 
       <Tabs defaultValue="orders">
-        <TabsList className="h-12! w-full max-w-xl p-1">
+        <TabsList className="h-12! w-full max-w-2xl p-1">
           <TabsTrigger value="orders" className="text-base">Orders ({run.orders.length})</TabsTrigger>
           <TabsTrigger value="route" className="text-base">Route ({run.route.length})</TabsTrigger>
           <TabsTrigger value="decisions" className="text-base">Decisions ({decisions.length})</TabsTrigger>
+          <TabsTrigger value="suggestions" className="text-base">Suggestions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="orders" className="mt-4">
@@ -481,6 +483,10 @@ function Results({ run }: { run: AgentRun }) {
 
         <TabsContent value="route" className="mt-4">
           <RouteResults route={run.route} />
+        </TabsContent>
+
+        <TabsContent value="suggestions" className="mt-4">
+          <SuggestionsCard />
         </TabsContent>
 
         <TabsContent value="decisions" className="mt-4">

@@ -268,3 +268,6 @@ export function mockInvestorStatement(id: string, month = "2026-10"): InvestorSt
     daily: series(30, 40, 1.2),
   };
 }
+
+// Suggestions (proposed contract, see api-types.ts): the same examples the dashboard uses.
+export { mockSuggestions } from "./ui/suggestions";

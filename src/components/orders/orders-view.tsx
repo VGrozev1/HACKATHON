@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/states";
 import { Chip } from "@/components/controls";
+import { SuggestionsCard } from "@/components/suggestions-card";
 import { OrderStatusBadge, orderStatusMeta, orderStatusRank, RejectionReasons } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -174,6 +175,8 @@ export function OrdersView() {
           </div>
         </>
       )}
+
+      <SuggestionsCard className="mt-8" />
 
       <Sheet open={open !== null} onOpenChange={(v) => !v && setOpenId(null)}>
         <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl! data-[side=right]:sm:max-w-xl">

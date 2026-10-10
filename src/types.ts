@@ -140,3 +140,7 @@ export interface AgentSuggestion {
   confidence: "high" | "medium" | "low";
   status: SuggestionStatus;
 }
+
+// ─── Agent suggestions (Run night, Orders) ───────────────────────────────────
+// The contract shape is the view model too; see src/lib/api-types.ts.
+export type { Suggestion, SuggestionType } from "@/lib/api-types";

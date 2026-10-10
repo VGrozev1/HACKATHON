@@ -25,6 +25,7 @@ import type {
   PurchaseOrder,
   SalesPoint,
   Slot,
+  Suggestion,
   Visit,
 } from "@/types";
 import { addDays, DEMO_NOW, dayKey } from "@/lib/format";
@@ -33,6 +34,7 @@ import { forecastFor, salesFor } from "@/mocks/ui/sales";
 import { pastOrders, tonightsOrders } from "@/mocks/ui/orders";
 import { agentScript, agentSummary, tonightsRoute } from "@/mocks/ui/agent";
 import { benchmarkResult } from "@/mocks/ui/investor";
+import { mockSuggestions } from "@/mocks/ui/suggestions";
 import { profitWeeksFromSales, statementFromSales, suggestionsFrom } from "@/lib/insights";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
@@ -544,3 +546,42 @@ export async function respondToSuggestion(id: string, status: Exclude<Suggestion
 
 /** Contract steps → readable screen steps (exported for tests and for Viktor to check his output). */
 export const screenSteps = (steps: Contract.AgentStep[]): AgentStep[] => steps.flatMap(fromStep);
+
+// ─── Agent suggestions ───────────────────────────────────────────────────────
+// GET /api/suggestions, POST /api/suggestions/:id/accept|reject (proposed; see
+// api-types.ts). They come from Viktor's agent, so they follow AGENT_LIVE: until the
+// agent writes them to the database, both modes use the mocks.
+
+let mockSuggestionState: Suggestion[] = mockSuggestions.map((s) => ({ ...s }));
+
+/** The agent's suggestions, newest night first; `pending` only, or all. */
+export async function getNightSuggestions(status: "pending" | "all" = "all"): Promise<Suggestion[]> {
+  const list = AGENT_LIVE
+    ? await withBackup(
+        "getNightSuggestions",
+        () => http<Suggestion[]>(`/api/suggestions${status === "pending" ? "?status=pending" : ""}`),
+        async () => mockSuggestionState,
+      )
+    : (await latency(), mockSuggestionState);
+  return list
+    .filter((s) => status === "all" || s.status === "pending")
+    .sort((a, b) => b.runDate.localeCompare(a.runDate));
+}
+
+async function decideSuggestion(id: string, decision: "accept" | "reject"): Promise<Suggestion> {
+  const status = decision === "accept" ? "accepted" : "rejected";
+  const local = async () => {
+    await sleep(500);
+    const found = mockSuggestionState.find((s) => s.id === id);
+    if (!found) throw new Error(`Suggestion ${id} not found`);
+    const updated = { ...found, status } as Suggestion;
+    mockSuggestionState = mockSuggestionState.map((s) => (s.id === id ? updated : s));
+    return updated;
+  };
+  if (!AGENT_LIVE) return local();
+  return withBackup("decideSuggestion", () => http<Suggestion>(`/api/suggestions/${encodeURIComponent(id)}/${decision}`, { method: "POST" }), local);
+}
+
+/** Accepting only records the decision: it never changes prices, stock or orders. */
+export const acceptSuggestion = (id: string) => decideSuggestion(id, "accept");
+export const rejectSuggestion = (id: string) => decideSuggestion(id, "reject");
