@@ -25,10 +25,10 @@ npm run dev            # http://localhost:3000
 Then switch to your own branch:
 
 ```bash
-git checkout todor     # or viktor / kalin
+git checkout todor/data      # or viktor/agent, kalin/frontend
 ```
 
-Merge into `main` through pull requests. Pull `main` into your branch at each checkpoint.
+Branches are `<name>/<topic>`. Merge into `main` through pull requests. Pull `main` into your branch at each checkpoint.
 
 ## Scripts
 
