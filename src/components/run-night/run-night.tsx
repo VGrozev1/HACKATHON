@@ -99,7 +99,8 @@ export function RunNight() {
       />
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <Timeline steps={steps} phase={phase} startedAt={startedAt} finishedAt={finishedAt} />
-        <div className="min-w-0">
+        {/* overflow-x-clip: the results slide in from the right without a sideways scrollbar */}
+        <div className="min-w-0 overflow-x-clip">
           {phase === "error" && error ? (
             <ErrorState error={error} onRetry={start} />
           ) : run ? (
