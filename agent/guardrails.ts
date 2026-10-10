@@ -1,4 +1,4 @@
-import { suppliers, products, warehouse, avgDailySales } from "./mock-data.ts";
+import { suppliers, products, warehouse, avgDailySales, machines } from "./mock-data.ts";
 
 export const AUTO_APPROVE_LIMIT_EUR = 300;
 
@@ -101,4 +101,75 @@ export function checkOrder(supplier: string, lines: OrderLine[]): OrderCheckResu
   const status: OrderStatus =
     totalEur > AUTO_APPROVE_LIMIT_EUR ? "awaiting_approval" : "approved";
   return { status, totalEur, reasons: [] };
+}
+
+export const MAX_SUGGESTIONS_PER_NIGHT = 5;
+export const MAX_PRICE_CHANGE_PERCENT = 15;
+
+export type SuggestionType = "extra_stock" | "product_swap" | "price_change" | "visit_change";
+
+export type SuggestionInput = {
+  type: SuggestionType;
+  machineId: string;
+  product?: string;
+  // Only meaningful (and required) when type is "price_change" — the
+  // proposed change, e.g. -10 for a 10% discount, 12 for a 12% increase.
+  // Not part of the tool's literal field list in the guide, but there's no
+  // other way to enforce a numeric ±15% cap in code without one.
+  percentChange?: number;
+};
+
+export type SuggestionCheckResult = {
+  status: "pending" | "rejected";
+  reasons: string[];
+};
+
+export function checkSuggestion(
+  input: SuggestionInput,
+  pendingSuggestionsSoFarTonight: number,
+): SuggestionCheckResult {
+  const reasons: string[] = [];
+
+  if (pendingSuggestionsSoFarTonight >= MAX_SUGGESTIONS_PER_NIGHT) {
+    reasons.push(
+      `Already have ${MAX_SUGGESTIONS_PER_NIGHT} suggestions tonight — not adding another.`,
+    );
+  }
+
+  const machine = machines.find((m) => m.id === input.machineId);
+  if (!machine) {
+    reasons.push(`Unknown machine ID "${input.machineId}"`);
+  }
+
+  if (input.product !== undefined) {
+    const product = products.find((p) => p.name === input.product);
+    if (!product) {
+      reasons.push(
+        `"${input.product}" is not a product we carry. Known products: ${products
+          .map((p) => p.name)
+          .join(", ")}.`,
+      );
+    }
+  }
+
+  if (input.type === "price_change") {
+    // "only for approved products" — the unknown-product check above
+    // already rejects this if input.product isn't in our catalog.
+    if (input.product === undefined) {
+      reasons.push(`A price_change suggestion must name a product.`);
+    }
+
+    if (input.percentChange === undefined) {
+      reasons.push(`A price_change suggestion must include a percentChange.`);
+    } else if (Math.abs(input.percentChange) > MAX_PRICE_CHANGE_PERCENT) {
+      reasons.push(
+        `Price changes can be at most ±${MAX_PRICE_CHANGE_PERCENT}% — got ${input.percentChange}%.`,
+      );
+    }
+  }
+
+  if (reasons.length > 0) {
+    return { status: "rejected", reasons };
+  }
+  return { status: "pending", reasons: [] };
 }

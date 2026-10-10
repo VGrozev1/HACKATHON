@@ -105,16 +105,22 @@ export const stock: Record<string, StockEntry[]> = {
 };
 
 // Average units sold per day, per product, per machine — used by forecast().
+// Two numbers here are deliberately tuned as demo signals for Step 11's
+// nightly-suggestions feature: OFF-01's Water barely moves (would take ~50
+// days to sell a full 20-unit slot — a classic "slow seller" tying up slot
+// capacity), while GYM-01's Energy drink sells fast enough relative to its
+// 12-unit capacity that it reliably runs low again within a couple of days
+// ("always sells out early"), independent of any weather/holiday effect.
 export const avgDailySales: Record<string, Record<string, number>> = {
   "GYM-01": {
     "Water 0.5l": 4.5,
-    "Energy drink": 3,
+    "Energy drink": 5,
     "Protein bar": 2,
   },
   "OFF-01": {
     "Coffee to go": 6,
     "Sandwich": 5,
-    "Water 0.5l": 2,
+    "Water 0.5l": 0.4,
   },
   "HOS-01": {
     "Water 0.5l": 3,
