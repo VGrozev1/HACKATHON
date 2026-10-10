@@ -67,6 +67,8 @@ export interface PurchaseOrder {
   lines: { product: string; quantity: number; unitCost: number }[];
   machineIds: string[];
   explanation: string;
+  /** Why the order guardrail rejected it (rejected orders only). */
+  rejectionReasons?: string[];
 }
 
 export interface Visit {
@@ -98,10 +100,22 @@ export interface AgentRun {
   summary: string;
 }
 
+export interface StrategyTotals {
+  /** Sales missed because a slot was empty. */
+  stockOuts: number;
+  expiredProducts: number;
+  /** Total sales, when known (mock only); 0 when not reported. */
+  revenue: number;
+  /** € of sales missed to empty slots. */
+  lostRevenue?: number;
+  /** € of stock thrown away after expiring. */
+  wastedCost?: number;
+}
+
 export interface BenchmarkResult {
   days: number;
-  agent: { stockOuts: number; expiredProducts: number; revenue: number };
-  fixedOrder: { stockOuts: number; expiredProducts: number; revenue: number };
+  agent: StrategyTotals;
+  fixedOrder: StrategyTotals;
   daily: { date: string; agentStockOuts: number; fixedStockOuts: number }[];
 }
 
@@ -138,3 +152,7 @@ export interface AgentSuggestion {
   confidence: "high" | "medium" | "low";
   status: SuggestionStatus;
 }
+
+// ─── Agent suggestions (Run night, Orders) ───────────────────────────────────
+// The contract shape is the view model too; see src/lib/api-types.ts.
+export type { Suggestion, SuggestionType } from "@/lib/api-types";

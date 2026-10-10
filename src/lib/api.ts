@@ -1,7 +1,7 @@
 // The frontend's only data source (Kalin, C1–C7). Every screen calls these functions,
-// never the mocks directly, so switching to the real backend is a config change:
+// never the mocks directly, so switching between real and mock data is one setting:
 //
-//   NEXT_PUBLIC_USE_MOCK=false             use the real endpoints (default: mocks)
+//   NEXT_PUBLIC_USE_MOCK=true              use the built-in mocks (default: Todor's real API)
 //   NEXT_PUBLIC_API_BASE_URL=https://...   where they live (default: this app's own /api)
 //   NEXT_PUBLIC_AGENT_LIVE=true            use the real agent run for Run night (once B1 is live)
 //
@@ -15,7 +15,6 @@ import type {
   SuggestionStatus,
   AgentRun,
   AgentStep,
-  AgentStepType,
   Alert,
   BenchmarkResult,
   ForecastPoint,
@@ -26,6 +25,7 @@ import type {
   PurchaseOrder,
   SalesPoint,
   Slot,
+  Suggestion,
   Visit,
 } from "@/types";
 import { addDays, DEMO_NOW, dayKey } from "@/lib/format";
@@ -34,9 +34,11 @@ import { forecastFor, salesFor } from "@/mocks/ui/sales";
 import { pastOrders, tonightsOrders } from "@/mocks/ui/orders";
 import { agentScript, agentSummary, tonightsRoute } from "@/mocks/ui/agent";
 import { benchmarkResult } from "@/mocks/ui/investor";
+import { mockSuggestions } from "@/mocks/ui/suggestions";
 import { profitWeeksFromSales, statementFromSales, suggestionsFrom } from "@/lib/insights";
 
-export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
+// Real API by default; any failed call falls back to the mocks (see withBackup).
+export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 /** The real agent run endpoints (Viktor, B1) are live. Until then Run night uses the scripted run. */
 export const AGENT_LIVE = !USE_MOCK && process.env.NEXT_PUBLIC_AGENT_LIVE === "true";
@@ -47,8 +49,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Mock latency, so loading skeletons are visible but never slow the demo down. */
 const latency = () => sleep(250 + Math.random() * 250);
 
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
+/** A dead API must not stall the demo: every call gives up after `timeoutMs`. */
+async function http<T>(path: string, init?: RequestInit, timeoutMs = 8000): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
+    signal: AbortSignal.timeout(timeoutMs),
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
     cache: "no-store",
@@ -145,6 +149,7 @@ function fromOrder(o: Contract.PurchaseOrder): PurchaseOrder {
     lines: o.lines.map((l) => ({ product: l.productName, quantity: l.quantity, unitCost: l.unitCost })),
     machineIds: o.machineIds,
     explanation: o.explanation,
+    rejectionReasons: o.rejectionReasons,
   };
 }
 
@@ -174,26 +179,89 @@ function describe(value: unknown): string | undefined {
   return undefined;
 }
 
-const stepType: Record<Contract.AgentStep["type"], AgentStepType> = {
-  thought: "thinking",
-  tool_call: "tool_call",
-  tool_result: "tool_result",
-  decision: "decision",
-  error: "guardrail",
+/** Plain-language names for Viktor's agent tools (agent/tools.ts). */
+const TOOL_LABEL: Record<string, string> = {
+  list_machines: "Listing the machines",
+  get_stock: "Reading stock",
+  forecast: "Forecasting demand",
+  plan_route: "Planning the route",
+  create_purchase_order: "Placing a purchase order",
+  notify_stocker: "Sending load lists to the stocker",
+  get_weather: "Checking the weather",
+  get_holidays: "Checking public holidays",
+  check_alerts: "Checking for alerts",
+  create_suggestion: "Raising a suggestion",
 };
 
-function fromStep(s: Contract.AgentStep, i: number): AgentStep {
-  const type = stepType[s.type];
-  const fallbackTitle =
-    type === "tool_call" ? `Calling ${s.tool}` : type === "tool_result" ? `${s.tool} returned` : "Step";
-  return {
-    id: `step-${i}`,
-    timestamp: s.at,
-    type,
-    tool: s.tool,
-    title: s.text ?? fallbackTitle,
-    detail: type === "tool_call" ? describe(s.input) : describe(s.output),
-  };
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
+const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+const eur = (n: number) => `€${Math.round(n)}`;
+
+function describeInput(tool: string | undefined, input: unknown): string | undefined {
+  if (!isObj(input)) return describe(input);
+  if (tool === "create_purchase_order") {
+    const lines = Array.isArray(input.lines) ? input.lines.length : undefined;
+    return [str(input.supplier) ?? str(input.supplierId), lines !== undefined ? `${lines} line${lines === 1 ? "" : "s"}` : undefined].filter(Boolean).join(": ");
+  }
+  const machine = str(input.machineId) ?? str(input.machine_id);
+  if (machine) return machine;
+  return describe(input);
+}
+
+/** Turns one tool output into a readable card: orders and suggestions become decisions or guardrails. */
+function resultStep(id: string, at: string, tool: string | undefined, output: unknown, isError: boolean): AgentStep {
+  const base = { id, timestamp: at, tool };
+  if (isObj(output) && (isError || str(output.error))) {
+    return { ...base, type: "guardrail", title: `${TOOL_LABEL[tool ?? ""] ?? tool} failed`, detail: str(output.error) };
+  }
+  if (isObj(output) && str(output.status) && (num(output.totalEur) ?? num(output.total)) !== undefined) {
+    const total = eur((num(output.totalEur) ?? num(output.total))!);
+    const supplier = str(output.supplier) ?? str(output.supplierName) ?? "the supplier";
+    const reasons = Array.isArray(output.reasons) ? output.reasons.filter((r): r is string => typeof r === "string") : [];
+    const status = str(output.status)!.toLowerCase();
+    if (status === "rejected") {
+      return { ...base, type: "guardrail", title: `Order ${total} to ${supplier} rejected${reasons[0] ? `: ${reasons[0]}` : ""}`, detail: reasons.slice(1).join(" ") || undefined };
+    }
+    if (status === "awaiting_approval") {
+      return { ...base, type: "guardrail", title: `Order ${total} to ${supplier} exceeds the €300 limit: waiting for approval`, detail: str(output.reason) };
+    }
+    return { ...base, type: "decision", title: `Ordered ${total} from ${supplier}: sent automatically`, detail: str(output.reason) };
+  }
+  if (isObj(output) && str(output.suggestion)) {
+    return { ...base, type: "decision", title: `Suggestion for ${str(output.machineName) ?? str(output.machineId)}: ${str(output.suggestion)}`, detail: str(output.reason) };
+  }
+  return { ...base, type: "tool_result", title: `${TOOL_LABEL[tool ?? ""] ?? tool ?? "Step"}: done`, detail: describe(output) };
+}
+
+/**
+ * One contract step → one or two screen steps. A tool_call that already carries its
+ * output (how Viktor's runNight() reports steps) becomes the call plus its result card.
+ */
+function fromStep(s: Contract.AgentStep, i: number): AgentStep[] {
+  const id = `step-${i}`;
+  switch (s.type) {
+    case "thought":
+      return [{ id, timestamp: s.at, type: "thinking", title: s.text ?? "Thinking" }];
+    case "decision":
+      return [{ id, timestamp: s.at, type: "decision", title: s.text ?? "Decision" }];
+    case "error":
+      return [{ id, timestamp: s.at, type: "guardrail", title: s.text ?? "Something went wrong", detail: describe(s.output) }];
+    case "tool_result":
+      return [resultStep(id, s.at, s.tool, s.output, false)];
+    case "tool_call": {
+      const call: AgentStep = {
+        id,
+        timestamp: s.at,
+        type: "tool_call",
+        tool: s.tool,
+        title: s.text ?? TOOL_LABEL[s.tool ?? ""] ?? `Calling ${s.tool}`,
+        detail: describeInput(s.tool, s.input),
+      };
+      return s.output === undefined ? [call] : [call, resultStep(`${id}-r`, s.at, s.tool, s.output, false)];
+    }
+  }
 }
 
 // ─── Backup data ─────────────────────────────────────────────────────────────
@@ -216,17 +284,28 @@ class NoBackupError extends Error {
   }
 }
 
+/** After a failure, use backup data for a while instead of waiting on a dead API every call. */
+const COOLDOWN_MS = 30_000;
+let backupUntil = 0;
+
+function setUsingBackup(value: boolean) {
+  if (usingBackup === value) return;
+  usingBackup = value;
+  backupListeners.forEach((l) => l());
+}
+
 async function withBackup<T>(what: string, real: () => Promise<T>, backup: () => Promise<T>): Promise<T> {
   if (USE_MOCK) return backup();
+  if (Date.now() < backupUntil) return backup();
   try {
-    return await real();
+    const result = await real();
+    setUsingBackup(false);
+    return result;
   } catch (e) {
     if (e instanceof NoBackupError) throw e.cause;
     console.warn(`[api] ${what} failed, using backup data:`, e);
-    if (!usingBackup) {
-      usingBackup = true;
-      backupListeners.forEach((l) => l());
-    }
+    backupUntil = Date.now() + COOLDOWN_MS;
+    setUsingBackup(true);
     return backup();
   }
 }
@@ -377,7 +456,7 @@ async function realRunNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
   const started = Date.now();
   for (;;) {
     run = await http<Contract.AgentRun>(`/api/agent/runs/${encodeURIComponent(runId)}`);
-    run.steps.slice(seen).forEach((s, i) => onStep(fromStep(s, seen + i)));
+    run.steps.slice(seen).forEach((s, i) => fromStep(s, seen + i).forEach(onStep));
     seen = run.steps.length;
     if (run.status !== "RUNNING") break;
     if (Date.now() - started > 5 * 60_000) throw new Error("The agent is taking longer than 5 minutes");
@@ -393,7 +472,7 @@ async function realRunNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
   return {
     id: run.id,
     date: run.runDate,
-    steps: run.steps.map(fromStep),
+    steps: run.steps.flatMap(fromStep),
     orders: orders.filter((o) => o.agentRunId === run.id).map(fromOrder),
     route: visits.map(fromVisit).sort((a, b) => a.order - b.order),
     summary: run.explanation ?? run.decisions.map((d) => d.summary).join(". "),
@@ -426,22 +505,51 @@ async function mockRunNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
 // ─── Simulation ──────────────────────────────────────────────────────────────
 
 /** POST /api/sim/fast-forward?days=7 */
+function fromBenchmark(b: Contract.Benchmark): BenchmarkResult {
+  // The contract reports lost revenue rather than revenue; screens hide revenue when it's 0.
+  const totals = (r: Contract.StrategyResult) => ({
+    stockOuts: r.stockOuts,
+    expiredProducts: r.expiredUnits,
+    revenue: 0,
+    lostRevenue: r.lostRevenue,
+    wastedCost: r.wastedCost,
+  });
+  return {
+    days: b.daily.length,
+    agent: totals(b.agent),
+    fixedOrder: totals(b.fixedWeeklyOrder),
+    daily: b.daily.map((d) => ({ date: d.day, agentStockOuts: d.agentStockOuts, fixedStockOuts: d.fixedStockOuts })),
+  };
+}
+
+/**
+ * POST /api/sim/fast-forward?days=7, then GET /api/benchmark for the result (A8): the
+ * agent against a fixed weekly order on the same simulated demand. Falls back to the
+ * benchmark in the fast-forward response if the second call fails.
+ */
 export function fastForward(days = 7): Promise<BenchmarkResult> {
   return withBackup(
     "fastForward",
     async () => {
-      const res = await http<Contract.FastForwardResponse>(`/api/sim/fast-forward?days=${days}`, { method: "POST" });
-      const b = res.benchmark;
-      return {
-        days: res.daysSimulated,
-        // The contract reports lost revenue rather than revenue; screens hide revenue when it's 0.
-        agent: { stockOuts: b.agent.stockOuts, expiredProducts: b.agent.expiredUnits, revenue: 0 },
-        fixedOrder: { stockOuts: b.fixedWeeklyOrder.stockOuts, expiredProducts: b.fixedWeeklyOrder.expiredUnits, revenue: 0 },
-        daily: b.daily.map((d) => ({ date: d.day, agentStockOuts: d.agentStockOuts, fixedStockOuts: d.fixedStockOuts })),
-      };
+      // ~2–4 s per simulated day (api.md), so this call gets a long timeout.
+      const res = await http<Contract.FastForwardResponse>(`/api/sim/fast-forward?days=${days}`, { method: "POST" }, 90_000);
+      const b = await http<Contract.Benchmark>("/api/benchmark").catch(() => res.benchmark);
+      return fromBenchmark(b);
     },
     async () => {
       await sleep(4000);
+      return benchmarkResult;
+    },
+  );
+}
+
+/** GET /api/benchmark: the last fast-forward's result, or a dry run of the next 7 days. */
+export function getBenchmark(): Promise<BenchmarkResult> {
+  return withBackup(
+    "getBenchmark",
+    async () => fromBenchmark(await http<Contract.Benchmark>("/api/benchmark")),
+    async () => {
+      await latency();
       return benchmarkResult;
     },
   );
@@ -478,3 +586,45 @@ export async function respondToSuggestion(id: string, status: Exclude<Suggestion
   await sleep(500);
   suggestionStatus.set(id, status);
 }
+
+/** Contract steps → readable screen steps (exported for tests and for Viktor to check his output). */
+export const screenSteps = (steps: Contract.AgentStep[]): AgentStep[] => steps.flatMap(fromStep);
+
+// ─── Agent suggestions ───────────────────────────────────────────────────────
+// GET /api/suggestions, POST /api/suggestions/:id/accept|reject (proposed; see
+// api-types.ts). They come from Viktor's agent, so they follow AGENT_LIVE: until the
+// agent writes them to the database, both modes use the mocks.
+
+let mockSuggestionState: Suggestion[] = mockSuggestions.map((s) => ({ ...s }));
+
+/** The agent's suggestions, newest night first; `pending` only, or all. */
+export async function getNightSuggestions(status: "pending" | "all" = "all"): Promise<Suggestion[]> {
+  const list = AGENT_LIVE
+    ? await withBackup(
+        "getNightSuggestions",
+        () => http<Suggestion[]>(`/api/suggestions${status === "pending" ? "?status=pending" : ""}`),
+        async () => mockSuggestionState,
+      )
+    : (await latency(), mockSuggestionState);
+  return list
+    .filter((s) => status === "all" || s.status === "pending")
+    .sort((a, b) => b.runDate.localeCompare(a.runDate));
+}
+
+async function decideSuggestion(id: string, decision: "accept" | "reject"): Promise<Suggestion> {
+  const status = decision === "accept" ? "accepted" : "rejected";
+  const local = async () => {
+    await sleep(500);
+    const found = mockSuggestionState.find((s) => s.id === id);
+    if (!found) throw new Error(`Suggestion ${id} not found`);
+    const updated = { ...found, status } as Suggestion;
+    mockSuggestionState = mockSuggestionState.map((s) => (s.id === id ? updated : s));
+    return updated;
+  };
+  if (!AGENT_LIVE) return local();
+  return withBackup("decideSuggestion", () => http<Suggestion>(`/api/suggestions/${encodeURIComponent(id)}/${decision}`, { method: "POST" }), local);
+}
+
+/** Accepting only records the decision: it never changes prices, stock or orders. */
+export const acceptSuggestion = (id: string) => decideSuggestion(id, "accept");
+export const rejectSuggestion = (id: string) => decideSuggestion(id, "reject");

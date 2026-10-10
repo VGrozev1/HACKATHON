@@ -5,8 +5,8 @@ import type { BenchmarkResult } from "@/types";
 
 export const benchmarkResult: BenchmarkResult = {
   days: 7,
-  agent: { stockOuts: 2, expiredProducts: 3, revenue: 11842 },
-  fixedOrder: { stockOuts: 14, expiredProducts: 11, revenue: 11036 },
+  agent: { stockOuts: 2, expiredProducts: 3, revenue: 11842, lostRevenue: 6.2, wastedCost: 4.9 },
+  fixedOrder: { stockOuts: 14, expiredProducts: 11, revenue: 11036, lostRevenue: 41.8, wastedCost: 16.4 },
   daily: [
     { date: "2026-10-11", agentStockOuts: 0, fixedStockOuts: 0 },
     { date: "2026-10-12", agentStockOuts: 1, fixedStockOuts: 1 },

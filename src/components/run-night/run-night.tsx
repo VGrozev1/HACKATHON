@@ -28,8 +28,9 @@ import { useAsync } from "@/hooks/use-async";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState } from "@/components/states";
-import { OrderStatusBadge } from "@/components/status";
+import { OrderStatusBadge, orderStatusRank, RejectionReasons } from "@/components/status";
 import { RouteMap } from "@/components/maps";
+import { SuggestionsCard } from "@/components/suggestions-card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -410,8 +411,11 @@ function ResultsPlaceholder() {
 }
 
 function Results({ run }: { run: AgentRun }) {
-  const total = run.orders.reduce((s, o) => s + o.total, 0);
+  const placed = run.orders.filter((o) => o.status !== "rejected");
+  const total = placed.reduce((s, o) => s + o.total, 0);
   const waiting = run.orders.filter((o) => o.status === "waiting_for_approval").length;
+  const rejected = run.orders.length - placed.length;
+  const orders = [...run.orders].sort((a, b) => orderStatusRank[a.status] - orderStatusRank[b.status]);
   const decisions = run.steps.filter((s) => s.type === "decision" || s.type === "guardrail");
 
   return (
@@ -421,18 +425,20 @@ function Results({ run }: { run: AgentRun }) {
           <Sparkles className="size-4" /> Agent summary
         </div>
         <p className="text-lg leading-relaxed">{run.summary}</p>
-        <div className="mt-5 grid grid-cols-3 gap-4 border-t pt-5">
+        <div className="mt-5 grid grid-cols-2 gap-4 border-t pt-5 sm:grid-cols-4">
           <Figure label="Ordered" value={formatEUR(total)} />
           <Figure label="Stops tomorrow" value={String(run.route.length)} />
-          <Figure label="Waiting for approval" value={String(waiting)} tone={waiting ? "warn" : undefined} />
+          <Figure label="Awaiting approval" value={String(waiting)} tone={waiting ? "warn" : undefined} />
+          <Figure label="Rejected" value={String(rejected)} tone={rejected ? "crit" : undefined} />
         </div>
       </section>
 
       <Tabs defaultValue="orders">
-        <TabsList className="h-12! w-full max-w-xl p-1">
+        <TabsList className="h-12! w-full max-w-2xl p-1">
           <TabsTrigger value="orders" className="text-base">Orders ({run.orders.length})</TabsTrigger>
           <TabsTrigger value="route" className="text-base">Route ({run.route.length})</TabsTrigger>
           <TabsTrigger value="decisions" className="text-base">Decisions ({decisions.length})</TabsTrigger>
+          <TabsTrigger value="suggestions" className="text-base">Suggestions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="orders" className="mt-4">
@@ -440,8 +446,15 @@ function Results({ run }: { run: AgentRun }) {
             <EmptyState title="No orders tonight" description="Stock covers demand until the next delivery." />
           ) : (
             <div className="grid gap-4 2xl:grid-cols-2">
-              {run.orders.map((o) => (
-                <article key={o.id} className="flex flex-col rounded-2xl border bg-card p-5 shadow-sm">
+              {orders.map((o) => (
+                <article
+                  key={o.id}
+                  className={cn(
+                    "flex flex-col rounded-2xl border bg-card p-5 shadow-sm",
+                    o.status === "waiting_for_approval" && "border-warn/60",
+                    o.status === "rejected" && "border-crit/30 bg-muted/40",
+                  )}
+                >
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <h3 className="text-lg font-semibold">{o.supplier}</h3>
@@ -449,9 +462,12 @@ function Results({ run }: { run: AgentRun }) {
                         {o.id} · delivery {formatDate(o.deliveryDate)}
                       </p>
                     </div>
-                    <span className="text-2xl font-bold tabular-nums">{formatEUR(o.total)}</span>
+                    <span className={cn("text-2xl font-bold tabular-nums", o.status === "rejected" && "text-muted-foreground line-through")}>
+                      {formatEUR(o.total)}
+                    </span>
                   </div>
                   <OrderStatusBadge status={o.status} className="mt-3 self-start" />
+                  <RejectionReasons reasons={o.rejectionReasons} className="mt-3" />
                   <p className="mt-3 flex-1 text-base leading-relaxed">{o.explanation}</p>
                   <p className="mt-3 text-sm text-muted-foreground">
                     {o.lines.map((l) => `${l.quantity} × ${l.product}`).join(" · ")}
@@ -467,6 +483,10 @@ function Results({ run }: { run: AgentRun }) {
 
         <TabsContent value="route" className="mt-4">
           <RouteResults route={run.route} />
+        </TabsContent>
+
+        <TabsContent value="suggestions" className="mt-4">
+          <SuggestionsCard />
         </TabsContent>
 
         <TabsContent value="decisions" className="mt-4">
@@ -501,11 +521,11 @@ function Results({ run }: { run: AgentRun }) {
   );
 }
 
-function Figure({ label, value, tone }: { label: string; value: string; tone?: "warn" }) {
+function Figure({ label, value, tone }: { label: string; value: string; tone?: "warn" | "crit" }) {
   return (
     <div>
       <div className="text-sm font-medium text-muted-foreground">{label}</div>
-      <div className={cn("text-3xl font-bold tabular-nums", tone === "warn" && "text-warn-strong")}>{value}</div>
+      <div className={cn("text-3xl font-bold tabular-nums", tone === "warn" && "text-warn-strong", tone === "crit" && "text-crit")}>{value}</div>
     </div>
   );
 }

@@ -1,22 +1,33 @@
 "use client";
 
-// C5: purchase orders and approvals. Table, side sheet per order, approve with a toast.
+// C5: purchase orders and approvals. Table, side sheet per order, approve after a
+// confirmation step, rejected orders with the guardrail's reasons.
 
 import Link from "next/link";
 import { useState } from "react";
-import { Check, Info, Loader2, Sparkles } from "lucide-react";
+import { Check, Info, Loader2, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import type { OrderStatus, PurchaseOrder } from "@/types";
-import { approveOrder, getOrders } from "@/lib/api";
+import { approveOrder, getMachines, getOrders } from "@/lib/api";
 import { formatDate, formatEUR, formatTime } from "@/lib/format";
 import { useAsync } from "@/hooks/use-async";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/states";
 import { Chip } from "@/components/controls";
-import { OrderStatusBadge, orderStatusMeta } from "@/components/status";
+import { SuggestionsCard } from "@/components/suggestions-card";
+import { OrderStatusBadge, orderStatusMeta, orderStatusRank, RejectionReasons } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const FILTERS: (OrderStatus | "all")[] = ["all", "waiting_for_approval", "sent_automatically", "approved", "rejected"];
 
@@ -25,9 +36,15 @@ export function OrdersView() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [approving, setApproving] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<OrderStatus | "all">("all");
+  const [confirming, setConfirming] = useState<PurchaseOrder | null>(null);
+  const machines = useAsync(getMachines, "machines");
+  const names = new Map(machines.data?.map((m) => [m.id, m.name]) ?? []);
 
   const open = orders?.find((o) => o.id === openId) ?? null;
-  const visible = orders?.filter((o) => filter === "all" || o.status === filter) ?? [];
+  // Awaiting approval first, rejected last; newest first within each.
+  const visible = (orders?.filter((o) => filter === "all" || o.status === filter) ?? []).sort(
+    (a, b) => orderStatusRank[a.status] - orderStatusRank[b.status] || b.createdAt.localeCompare(a.createdAt),
+  );
   const waiting = orders?.filter((o) => o.status === "waiting_for_approval") ?? [];
 
   const approve = async (order: PurchaseOrder) => {
@@ -124,6 +141,7 @@ export function OrdersView() {
                         className={cn(
                           "cursor-pointer border-t transition-colors hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none",
                           o.status === "waiting_for_approval" && "bg-warn-soft/50",
+                          o.status === "rejected" && "text-muted-foreground",
                         )}
                       >
                         <td className="px-4 py-4">
@@ -136,15 +154,16 @@ export function OrdersView() {
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">{formatDate(o.deliveryDate)}</td>
                         <td className="px-4 py-4 text-right font-bold tabular-nums">{formatEUR(o.total)}</td>
-                        <td className="px-4 py-4">
+                        <td className="max-w-64 px-4 py-4">
                           <OrderStatusBadge status={o.status} />
+                          {o.rejectionReasons?.[0] && <p className="mt-1 text-sm leading-snug text-crit">{o.rejectionReasons[0]}</p>}
                         </td>
                         <td className="max-w-48 px-4 py-4">
-                          <MachineChips ids={o.machineIds} max={2} />
+                          <MachineChips ids={o.machineIds} names={names} max={1} compact />
                         </td>
                         <td className="px-4 py-4 text-right">
                           {o.status === "waiting_for_approval" && (
-                            <ApproveButton busy={approving.has(o.id)} onClick={() => approve(o)} />
+                            <ApproveButton busy={approving.has(o.id)} onClick={() => setConfirming(o)} />
                           )}
                         </td>
                       </tr>
@@ -156,6 +175,8 @@ export function OrdersView() {
           </div>
         </>
       )}
+
+      <SuggestionsCard className="mt-8" />
 
       <Sheet open={open !== null} onOpenChange={(v) => !v && setOpenId(null)}>
         <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-xl! data-[side=right]:sm:max-w-xl">
@@ -173,6 +194,7 @@ export function OrdersView() {
               </SheetHeader>
 
               <div className="space-y-6 p-6">
+                <RejectionReasons reasons={open.rejectionReasons} />
                 <section className="rounded-xl border-2 border-primary/30 bg-accent/60 p-4">
                   <div className="mb-1.5 flex items-center gap-2 text-sm font-bold tracking-wider text-primary uppercase">
                     <Sparkles className="size-4" /> Why the agent ordered this
@@ -214,7 +236,7 @@ export function OrdersView() {
 
                 <section>
                   <h3 className="mb-2 text-lg font-semibold">Restocks these machines</h3>
-                  <MachineChips ids={open.machineIds} />
+                  <MachineChips ids={open.machineIds} names={names} />
                 </section>
 
                 {open.status === "waiting_for_approval" && (
@@ -223,7 +245,7 @@ export function OrdersView() {
                       This order is over the €300 limit, so the agent is waiting for your approval. The same request went to
                       Telegram.
                     </p>
-                    <ApproveButton busy={approving.has(open.id)} onClick={() => approve(open)} large className="mt-3 w-full" />
+                    <ApproveButton busy={approving.has(open.id)} onClick={() => setConfirming(open)} large className="mt-3 w-full" />
                   </div>
                 )}
               </div>
@@ -231,6 +253,47 @@ export function OrdersView() {
           )}
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={confirming !== null} onOpenChange={(v) => !v && setConfirming(null)}>
+        <AlertDialogContent className="max-w-md! gap-5 p-6">
+          {confirming && (
+            <>
+              <AlertDialogHeader className="place-items-start text-left">
+                <AlertDialogTitle className="text-xl font-bold">
+                  Approve {formatEUR(confirming.total)} to {confirming.supplier}?
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-base text-muted-foreground">
+                  The order email goes to the supplier now, for delivery on {formatDate(confirming.deliveryDate)}. You can&apos;t
+                  undo this from the dashboard.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <ul className="space-y-1 rounded-lg bg-muted px-4 py-3 text-base">
+                {confirming.lines.map((l) => (
+                  <li key={l.product} className="flex justify-between gap-4">
+                    <span>
+                      <b className="tabular-nums">{l.quantity}×</b> {l.product}
+                    </span>
+                    <span className="text-muted-foreground tabular-nums">{formatEUR(l.quantity * l.unitCost)}</span>
+                  </li>
+                ))}
+              </ul>
+              <AlertDialogFooter className="-mx-6 -mb-6 p-4 px-6">
+                <AlertDialogCancel className="h-11 px-5 text-base">Cancel</AlertDialogCancel>
+                <Button
+                  className="h-11 bg-ok px-5 text-base text-white hover:bg-ok/85"
+                  onClick={() => {
+                    const order = confirming;
+                    setConfirming(null);
+                    void approve(order);
+                  }}
+                >
+                  <Send /> Approve and send
+                </Button>
+              </AlertDialogFooter>
+            </>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -261,7 +324,7 @@ function ApproveButton({
   );
 }
 
-function MachineChips({ ids, max }: { ids: string[]; max?: number }) {
+function MachineChips({ ids, names, max, compact }: { ids: string[]; names?: Map<string, string>; max?: number; compact?: boolean }) {
   const shown = max ? ids.slice(0, max) : ids;
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -270,12 +333,16 @@ function MachineChips({ ids, max }: { ids: string[]; max?: number }) {
           key={id}
           href={`/machines/${id}`}
           onClick={(e) => e.stopPropagation()}
-          className="rounded-md border bg-card px-2 py-0.5 font-mono text-xs font-semibold hover:border-primary hover:text-primary"
+          title={id}
+          className={cn(
+            "rounded-md border bg-card px-2 py-0.5 text-sm font-medium text-foreground hover:border-primary hover:text-primary",
+            compact && "max-w-44 truncate whitespace-nowrap",
+          )}
         >
-          {id}
+          {names?.get(id) ?? id}
         </Link>
       ))}
-      {max && ids.length > max && <span className="self-center text-sm text-muted-foreground">+{ids.length - max}</span>}
+      {max && ids.length > max && <span className="self-center text-sm text-muted-foreground">+{ids.length - max} more</span>}
     </div>
   );
 }

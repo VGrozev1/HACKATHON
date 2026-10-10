@@ -113,6 +113,7 @@ export interface PurchaseOrder {
   lines: PurchaseOrderLine[];
   machineIds: string[]; // machines this order restocks
   agentRunId: string | null;
+  rejectionReasons?: string[]; // REJECTED only: why the order guardrail (B5) blocked it
   createdAt: ISODate;
 }
 
@@ -192,6 +193,27 @@ export interface FastForwardResponse {
   daysSimulated: number;
   runIds: string[];
   benchmark: Benchmark;
+}
+
+// ─── GET /api/suggestions?status= · POST /api/suggestions/:id/accept|reject ──
+// Proposed by Kalin (C5/C7) for Viktor's create_suggestion tool (agent/tools.ts uses the
+// same shape). Not built yet: needs a Suggestion table and routes (Todor). Accepting or
+// rejecting only changes `status`: it never changes prices, stock or orders.
+
+export type SuggestionType = "extra_stock" | "product_swap" | "price_change" | "visit_change";
+export type SuggestionStatus = "pending" | "accepted" | "rejected";
+
+export interface Suggestion {
+  id: string;
+  runDate: Day; // the night that raised it
+  type: SuggestionType;
+  machineId: string;
+  machineName: string;
+  product?: string; // product name, when the suggestion is about one
+  suggestion: string; // "Load 2× water at Gym Lozenets"
+  reason: string; // the data behind it
+  expectedEffect: string; // "≈ 60 more bottles sold, no Saturday stock-out"
+  status: SuggestionStatus;
 }
 
 // ─── GET /api/investors/:id/statement?month=2026-10 ──────────────────────────

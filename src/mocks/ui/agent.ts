@@ -52,7 +52,13 @@ export const agentScript: StepSeed[] = [
     title: "Route planned: 6 stops, 24.8 km, about 2 h 45 min",
     detail: "Gym Druzhba → Business Park Sofia → Sofia Tech Park → Gym Lozenets → Lozenets Hospital → Alexandrovska Hospital",
   },
-  { type: "tool_call", tool: "create_purchase_order", title: "Ordering drinks", detail: "Sofia Beverages Ltd: 3 lines, €184.40" },
+  { type: "tool_call", tool: "create_purchase_order", title: "Ordering drinks", detail: "Sofia Beverages Ltd: 3 lines, €299.60" },
+  {
+    type: "guardrail",
+    title: "Order €300 to Sofia Beverages rejected: 600 water is above the warehouse capacity of 500",
+    detail: "Blocked by the order guardrail in code. Retrying once with 240 water, enough for the next two days.",
+  },
+  { type: "tool_call", tool: "create_purchase_order", title: "Ordering drinks again", detail: "Sofia Beverages Ltd: 3 lines, €184.40" },
   {
     type: "decision",
     title: "Ordered €184 from Sofia Beverages: sent automatically",
@@ -74,14 +80,15 @@ export const agentScript: StepSeed[] = [
   { type: "tool_call", tool: "notify_stocker", title: "Sending load lists", detail: "Telegram: 6 stops for Ivan, the stocker, starting 07:30" },
   {
     type: "done",
-    title: "Night planned in 20 steps",
-    detail: "3 orders (€692), 6 stops, 1 order waiting for approval.",
+    title: "Night planned in 22 steps",
+    detail: "3 orders (€692), 1 rejected and retried, 6 stops, 1 waiting for approval.",
   },
 ];
 
 export const agentSummary =
   "Tonight I planned a 6-stop route covering the 4 machines below 40% stock and the 2 with food about to expire. " +
   "I ordered €692 of stock from three suppliers: two orders went out automatically, and the €412 Balkan Snack Distribution order waits for your approval. " +
+  "My first drinks order was rejected for going over warehouse capacity, so I retried once with less water. " +
   "I also raised Gym Lozenets' water forecast by 30% for the hot weekend, and Sofia University's by 45% now that lectures have started.";
 
 export const tonightsRoute: Visit[] = [
