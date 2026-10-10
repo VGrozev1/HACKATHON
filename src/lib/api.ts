@@ -85,6 +85,7 @@ function mockMachine(id: string): Machine {
 // ─── Contract → view model ───────────────────────────────────────────────────
 
 const toLocationType = (t: Contract.LocationType): LocationType =>
+  t === "UNIVERSITY" ? "university" :
   t === "GYM" ? "gym" : t === "HOSPITAL" ? "hospital" : "office";
 
 const alertSeverity: Record<Contract.Alert["kind"], Alert["severity"]> = {

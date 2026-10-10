@@ -179,7 +179,7 @@ function expiryText(iso: string): { text: string; urgent: boolean } {
   if (hours < 0) return { text: "Expired", urgent: true };
   if (hours < 24) return { text: `in ${Math.round(hours)} h`, urgent: true };
   const days = Math.floor(hours / 24);
-  return { text: days <= 14 ? `${formatDate(iso)} · in ${days} day${days === 1 ? "" : "s"}` : formatDate(iso), urgent: days <= 2 };
+  return { text: days <= 14 ? `${formatDate(iso)} · in ${days} day${days === 1 ? "" : "s"}` : formatDate(iso), urgent: hours <= 48 };
 }
 
 function StockTable({ slots }: { slots: Slot[] }) {

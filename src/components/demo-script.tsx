@@ -13,7 +13,7 @@ const STEPS = [
   { href: "/", label: "Fleet overview", hint: "20 machines, 4 low on stock, 1 offline" },
   { href: "/machines/SOF-GYM-01", label: "Gym Lozenets detail", hint: "Sold out of water; forecast +30%" },
   { href: "/run-night", label: "Run night", hint: "Press the big button; narrate the steps" },
-  { href: "/orders", label: "Orders", hint: "Approve the €412 Snack Express order" },
+  { href: "/orders", label: "Orders", hint: "Approve the €412 Balkan Snack Distribution order" },
   { href: "/simulation", label: "Simulation", hint: "Fast-forward a week: the one number" },
   { href: "/investor/SOF-GYM-01", label: "Investor view", hint: "Statement and payout A / B / C" },
 ];

@@ -1,6 +1,6 @@
 // Small status pieces shared across screens: stock bars, location icons, badges.
 
-import { Building, Dumbbell, Hospital, WifiOff } from "lucide-react";
+import { Building, Dumbbell, GraduationCap, Hospital, WifiOff } from "lucide-react";
 import type { Alert, LocationType, OrderStatus } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -36,14 +36,22 @@ export function StockBar({ percent, className, thick }: { percent: number; class
   );
 }
 
+export const locationPlural: Record<LocationType, string> = {
+  gym: "Gyms",
+  office: "Offices",
+  hospital: "Hospitals",
+  university: "Universities",
+};
+
 export const locationLabel: Record<LocationType, string> = {
   gym: "Gym",
   office: "Office",
   hospital: "Hospital",
+  university: "University",
 };
 
 export function LocationIcon({ type, className }: { type: LocationType; className?: string }) {
-  const Icon = type === "gym" ? Dumbbell : type === "hospital" ? Hospital : Building;
+  const Icon = { gym: Dumbbell, office: Building, hospital: Hospital, university: GraduationCap }[type];
   return <Icon className={className} aria-hidden />;
 }
 

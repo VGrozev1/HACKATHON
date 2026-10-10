@@ -20,6 +20,7 @@ import {
   AlertBadge,
   LocationIcon,
   locationLabel,
+  locationPlural,
   OfflineBadge,
   severityRank,
   StockBar,
@@ -29,7 +30,7 @@ import {
 
 type View = "cards" | "map";
 type Sort = "stock-asc" | "stock-desc" | "name";
-const TYPES: LocationType[] = ["gym", "office", "hospital"];
+const TYPES: LocationType[] = ["gym", "office", "hospital", "university"];
 
 export function FleetOverview() {
   const { data: machines, error, loading, retry } = useAsync(getMachines, "machines");
@@ -75,7 +76,7 @@ export function FleetOverview() {
               {TYPES.map((t) => (
                 <Chip key={t} active={types.has(t)} onClick={() => toggleType(t)}>
                   <LocationIcon type={t} className="size-4" />
-                  {locationLabel[t]}s
+                  {locationPlural[t]}
                   {machines && <span className="text-current/60">{machines.filter((m) => m.locationType === t).length}</span>}
                 </Chip>
               ))}

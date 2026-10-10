@@ -12,10 +12,10 @@ export const TODAY = dayKey(DEMO_NOW); // "2026-10-10"
 /** Bulgarian public holidays inside the 60-day window. */
 const HOLIDAYS = new Set(["2026-09-07", "2026-09-22"]); // Unification Day (observed), Independence Day
 
-const BASE_UNITS: Record<LocationType, number> = { gym: 38, office: 52, hospital: 44 };
-const AVG_PRICE: Record<LocationType, number> = { gym: 2.65, office: 2.15, hospital: 2.4 };
+const BASE_UNITS: Record<LocationType, number> = { gym: 38, office: 52, hospital: 44, university: 50 };
+const AVG_PRICE: Record<LocationType, number> = { gym: 2.65, office: 2.15, hospital: 2.4, university: 2.0 };
 /** Share of a full day's sales already made by 20:15 on the demo evening. */
-const DONE_BY_NOW: Record<LocationType, number> = { gym: 0.72, office: 0.97, hospital: 0.82 };
+const DONE_BY_NOW: Record<LocationType, number> = { gym: 0.72, office: 0.97, hospital: 0.82, university: 0.9 };
 
 function dayFactor(type: LocationType, day: string): number {
   const dow = new Date(`${day}T12:00:00Z`).getUTCDay(); // 0 = Sunday
@@ -23,9 +23,11 @@ function dayFactor(type: LocationType, day: string): number {
   if (type === "gym") f = [1.25, 1.0, 1.05, 1.0, 1.05, 0.92, 1.35][dow];
   if (type === "office") f = [0.12, 1.0, 1.04, 1.02, 1.0, 0.86, 0.22][dow];
   if (type === "hospital") f = [0.94, 1.02, 1.0, 1.0, 1.01, 1.0, 0.95][dow];
-  if (HOLIDAYS.has(day)) f *= type === "office" ? 0.15 : type === "gym" ? 0.7 : 0.92;
+  if (type === "university") f = [0.2, 1.05, 1.08, 1.06, 1.0, 0.8, 0.3][dow];
+  if (HOLIDAYS.has(day)) f *= type === "office" || type === "university" ? 0.15 : type === "gym" ? 0.7 : 0.92;
   if (type === "office" && day < "2026-09-01") f *= 0.8; // summer holidays
   if (type === "gym" && day >= "2026-09-14") f *= 1.08; // back-to-gym September
+  if (type === "university" && day < "2026-10-01") f *= 0.3; // lectures start 1 October
   return f;
 }
 

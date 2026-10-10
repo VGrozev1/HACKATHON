@@ -2,7 +2,7 @@
 // They are deliberately simpler than the backend contract in src/lib/api-types.ts;
 // src/lib/api.ts converts the contract into these when USE_MOCK is off.
 
-export type LocationType = "gym" | "office" | "hospital";
+export type LocationType = "gym" | "office" | "hospital" | "university";
 
 export interface Alert {
   id: string;
