@@ -4,9 +4,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Suspense, useState, type ReactNode } from "react";
+import { Suspense, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   CalendarDays,
+  DatabaseBackup,
   ClipboardList,
   FastForward,
   Landmark,
@@ -17,7 +18,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DEMO_NOW, formatDate } from "@/lib/format";
-import { USE_MOCK } from "@/lib/api";
+import { isUsingBackup, subscribeBackup, USE_MOCK } from "@/lib/api";
+import { DemoScript } from "@/components/demo-script";
 
 const NAV = [
   { href: "/", label: "Fleet", icon: LayoutGrid, match: (p: string) => p === "/" || p.startsWith("/machines") },
@@ -109,6 +111,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </span>
             Demo mode · {USE_MOCK ? "simulated data" : "live simulation"}
           </span>
+          <BackupBadge />
           <span className="inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-sm font-semibold">
             <CalendarDays className="size-4 text-muted-foreground" aria-hidden />
             {formatDate(DEMO_NOW)}
@@ -116,7 +119,22 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         <main className="mx-auto w-full max-w-[1680px] flex-1 px-8 py-8">{children}</main>
       </div>
+      <DemoScript />
     </div>
+  );
+}
+
+/** Shown when the real API failed and the screens fell back to the built-in demo data. */
+function BackupBadge() {
+  const backup = useSyncExternalStore(subscribeBackup, isUsingBackup, () => false);
+  if (!backup) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full bg-warn-soft px-3 py-1 text-sm font-semibold text-warn-strong ring-1 ring-warn/40"
+      title="The API didn't answer, so the screens show the built-in demo data"
+    >
+      <DatabaseBackup className="size-4" aria-hidden /> Using backup data
+    </span>
   );
 }
 

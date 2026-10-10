@@ -83,6 +83,8 @@ export function RunNight() {
 
   return (
     <>
+      <RunProgress steps={steps.length} phase={phase} />
+      {phase === "done" && run && <SuccessBurst key={run.id + finishedAt} />}
       <PageHeader
         title="Tonight's agent run"
         description={`Planning the night of ${formatDate(DEMO_NOW)}: stock, forecast, orders and the stocker's route.`}
@@ -107,6 +109,51 @@ export function RunNight() {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Thin bar along the top of the window. The real agent's step count isn't known up front,
+ * so progress eases towards 95% as steps arrive and jumps to 100% when the run ends.
+ */
+function RunProgress({ steps, phase }: { steps: number; phase: Phase }) {
+  const pct = phase === "running" ? Math.min(95, (1 - Math.exp(-steps / 9)) * 100) : 100;
+  const done = phase !== "running";
+  return (
+    <div className="fixed inset-x-0 top-0 z-50 h-1.5 bg-transparent print:hidden" aria-hidden>
+      <div
+        className={cn(
+          "h-full transition-[width,opacity] duration-700 ease-out",
+          phase === "error" ? "bg-crit" : "bg-primary",
+          done && "opacity-0 delay-1000",
+        )}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+/** A short "night planned" moment when the run finishes; it fades out on its own. */
+function SuccessBurst() {
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(false), 1800);
+    return () => clearTimeout(t);
+  }, []);
+  if (!visible) return null;
+  return (
+    <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center print:hidden" role="status">
+      <div className="animate-success flex flex-col items-center gap-3 rounded-3xl border bg-card/95 px-12 py-9 shadow-2xl">
+        <span className="relative grid size-20 place-items-center">
+          <span className="absolute inset-0 animate-ping rounded-full bg-ok/30 [animation-iteration-count:2]" />
+          <span className="relative grid size-20 place-items-center rounded-full bg-ok text-white">
+            <CircleCheck className="size-11" strokeWidth={2.5} />
+          </span>
+        </span>
+        <p className="text-2xl font-bold">Night planned</p>
+        <p className="text-base text-muted-foreground">Orders sent, route on its way to Telegram</p>
+      </div>
+    </div>
   );
 }
 
@@ -202,8 +249,8 @@ function Timeline({
       </div>
 
       <ol className="flex-1 space-y-3 overflow-y-auto px-6 py-5" aria-live="polite">
-        {steps.map((s) => (
-          <StepItem key={s.id} step={s} />
+        {steps.map((s, i) => (
+          <StepItem key={s.id} step={s} active={phase === "running" && i === steps.length - 1} />
         ))}
         {phase === "running" && (
           <li className="flex items-center gap-3 pl-1 text-base text-muted-foreground">
@@ -221,24 +268,66 @@ function Timeline({
   );
 }
 
-function StepItem({ step }: { step: AgentStep }) {
+/**
+ * Reveals text letter by letter while `animate` is on, so the newest step reads like the
+ * agent typing it. Finishes within ~0.5 s and snaps to full text once the next step arrives.
+ */
+function Typed({ text, animate }: { text: string; animate: boolean }) {
+  const [shown, setShown] = useState(animate ? 0 : text.length);
+  useEffect(() => {
+    if (!animate || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const start = performance.now();
+    const duration = Math.min(550, text.length * 14);
+    let frame = requestAnimationFrame(function tick(now) {
+      const n = Math.ceil((Math.min(1, (now - start) / duration)) * text.length);
+      setShown(n);
+      if (n < text.length) frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [animate, text]);
+  if (!animate || shown >= text.length) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, shown)}
+      <span className="ml-0.5 inline-block h-[1em] w-0.5 translate-y-0.5 animate-pulse bg-current" aria-hidden />
+      {/* Keep the final text in the layout so lines don't jump while typing. */}
+      <span className="invisible">{text.slice(shown)}</span>
+    </>
+  );
+}
+
+/** The icon of the step the agent is on right now pulses, with a soft ring. */
+function StepIcon({ active, className, children }: { active: boolean; className?: string; children: React.ReactNode }) {
+  return (
+    <span className={cn("relative grid shrink-0 place-items-center", className)}>
+      {active && <span className="absolute inset-0 animate-ping rounded-[inherit] bg-current opacity-20" aria-hidden />}
+      <span className={cn("relative grid place-items-center", active && "animate-pulse")}>{children}</span>
+    </span>
+  );
+}
+
+function StepItem({ step, active }: { step: AgentStep; active: boolean }) {
   const time = <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{formatTimeSec(step.timestamp)}</span>;
 
   if (step.type === "decision" || step.type === "guardrail" || step.type === "done") {
     const style = {
-      decision: { box: "border-primary/40 bg-accent", icon: <Lightbulb className="text-primary" />, label: "Decision", labelClass: "text-primary" },
-      guardrail: { box: "border-warn bg-warn-soft", icon: <ShieldAlert className="text-warn-strong" />, label: "Guardrail", labelClass: "text-warn-strong" },
-      done: { box: "border-ok/50 bg-ok-soft", icon: <CircleCheck className="text-ok" />, label: "Done", labelClass: "text-ok" },
+      decision: { box: "border-primary/40 bg-accent", icon: <Lightbulb />, iconClass: "text-primary", label: "Decision", labelClass: "text-primary" },
+      guardrail: { box: "border-warn bg-warn-soft", icon: <ShieldAlert />, iconClass: "text-warn-strong", label: "Guardrail", labelClass: "text-warn-strong" },
+      done: { box: "border-ok/50 bg-ok-soft", icon: <CircleCheck />, iconClass: "text-ok", label: "Done", labelClass: "text-ok" },
     }[step.type];
     return (
       <li className={cn("animate-step-in flex gap-3 rounded-xl border-2 p-4", style.box)}>
-        <span className="mt-0.5 [&_svg]:size-6">{style.icon}</span>
+        <StepIcon active={active} className={cn("mt-0.5 size-7 rounded-full [&_svg]:size-6", style.iconClass)}>
+          {style.icon}
+        </StepIcon>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <span className={cn("text-xs font-bold tracking-wider uppercase", style.labelClass)}>{style.label}</span>
             {time}
           </div>
-          <p className="mt-0.5 text-lg leading-snug font-semibold">{step.title}</p>
+          <p className="mt-0.5 text-lg leading-snug font-semibold">
+            <Typed text={step.title} animate={active} />
+          </p>
           {step.detail && <p className="mt-1 text-base text-muted-foreground">{step.detail}</p>}
         </div>
       </li>
@@ -248,15 +337,19 @@ function StepItem({ step }: { step: AgentStep }) {
   if (step.type === "tool_call") {
     return (
       <li className="animate-step-in flex gap-3">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+        <StepIcon active={active} className="size-8 rounded-lg bg-primary/10 text-primary">
           <Wrench className="size-4" />
-        </span>
+        </StepIcon>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <code className="rounded-md bg-foreground px-2 py-0.5 font-mono text-sm font-semibold text-background">{step.tool}()</code>
             {time}
           </div>
-          {step.detail && <p className="mt-1 font-mono text-sm text-muted-foreground">{step.detail}</p>}
+          {step.detail && (
+            <p className="mt-1 font-mono text-sm text-muted-foreground">
+              <Typed text={step.detail} animate={active} />
+            </p>
+          )}
         </div>
       </li>
     );
@@ -265,10 +358,14 @@ function StepItem({ step }: { step: AgentStep }) {
   if (step.type === "tool_result") {
     return (
       <li className="animate-step-in flex gap-3 pl-6">
-        <CornerDownRight className="mt-1 size-5 shrink-0 text-muted-foreground" />
+        <StepIcon active={active} className="mt-1 size-5 rounded-full text-muted-foreground">
+          <CornerDownRight className="size-5" />
+        </StepIcon>
         <div className="min-w-0 flex-1 rounded-lg bg-muted px-3 py-2">
           <div className="flex items-start justify-between gap-2">
-            <p className="text-base font-semibold">{step.title}</p>
+            <p className="text-base font-semibold">
+              <Typed text={step.title} animate={active} />
+            </p>
             {time}
           </div>
           {step.detail && <p className="mt-0.5 text-sm text-muted-foreground">{step.detail}</p>}
@@ -280,12 +377,14 @@ function StepItem({ step }: { step: AgentStep }) {
   // thinking
   return (
     <li className="animate-step-in flex gap-3">
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+      <StepIcon active={active} className="size-8 rounded-lg bg-muted text-muted-foreground">
         <Brain className="size-4" />
-      </span>
+      </StepIcon>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-base font-medium">{step.title}</p>
+          <p className="text-base font-medium">
+            <Typed text={step.title} animate={active} />
+          </p>
           {time}
         </div>
         {step.detail && <p className="mt-0.5 text-base text-muted-foreground italic">{step.detail}</p>}
@@ -316,7 +415,7 @@ function Results({ run }: { run: AgentRun }) {
   const decisions = run.steps.filter((s) => s.type === "decision" || s.type === "guardrail");
 
   return (
-    <div className="animate-step-in space-y-6">
+    <div className="space-y-6 animate-in fade-in slide-in-from-right-10 duration-500 ease-out [animation-delay:300ms] [animation-fill-mode:both]">
       <section className="rounded-2xl border-2 border-primary/30 bg-card p-6 shadow-sm">
         <div className="mb-3 flex items-center gap-2 text-sm font-bold tracking-wider text-primary uppercase">
           <Sparkles className="size-4" /> Agent summary

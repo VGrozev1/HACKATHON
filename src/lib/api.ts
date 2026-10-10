@@ -188,87 +188,148 @@ function fromStep(s: Contract.AgentStep, i: number): AgentStep {
   };
 }
 
+// ─── Backup data ─────────────────────────────────────────────────────────────
+// In real mode, a failed call falls back to the mock data so the live demo never breaks.
+// The app shell subscribes to this and shows a "Using backup data" badge.
+
+let usingBackup = false;
+const backupListeners = new Set<() => void>();
+
+export function subscribeBackup(listener: () => void) {
+  backupListeners.add(listener);
+  return () => backupListeners.delete(listener);
+}
+export const isUsingBackup = () => usingBackup;
+
+/** Thrown to skip the fallback, e.g. when a run failed after its steps were already on screen. */
+class NoBackupError extends Error {
+  constructor(public readonly cause: unknown) {
+    super("no backup");
+  }
+}
+
+async function withBackup<T>(what: string, real: () => Promise<T>, backup: () => Promise<T>): Promise<T> {
+  if (USE_MOCK) return backup();
+  try {
+    return await real();
+  } catch (e) {
+    if (e instanceof NoBackupError) throw e.cause;
+    console.warn(`[api] ${what} failed, using backup data:`, e);
+    if (!usingBackup) {
+      usingBackup = true;
+      backupListeners.forEach((l) => l());
+    }
+    return backup();
+  }
+}
+
 // ─── Fleet ───────────────────────────────────────────────────────────────────
 
 /** GET /api/machines */
-export async function getMachines(): Promise<Machine[]> {
-  if (USE_MOCK) {
-    await latency();
-    return machineSeeds.map((m) => mockMachine(m.id));
-  }
-  const rows = await http<Contract.MachineSummary[]>("/api/machines");
-  return rows.map(fromMachineSummary);
+export function getMachines(): Promise<Machine[]> {
+  return withBackup(
+    "getMachines",
+    async () => (await http<Contract.MachineSummary[]>("/api/machines")).map(fromMachineSummary),
+    async () => {
+      await latency();
+      return machineSeeds.map((m) => mockMachine(m.id));
+    },
+  );
 }
 
 /** GET /api/machines/:id */
-export async function getMachine(id: string): Promise<Machine> {
-  if (USE_MOCK) {
-    await latency();
-    return mockMachine(id);
-  }
-  return fromMachineSummary(await http<Contract.MachineDetail>(`/api/machines/${encodeURIComponent(id)}`));
+export function getMachine(id: string): Promise<Machine> {
+  return withBackup(
+    "getMachine",
+    async () => fromMachineSummary(await http<Contract.MachineDetail>(`/api/machines/${encodeURIComponent(id)}`)),
+    async () => {
+      await latency();
+      return mockMachine(id);
+    },
+  );
 }
 
 /** GET /api/machines/:id/sales?days=60 */
-export async function getSales(id: string, days = 60): Promise<SalesPoint[]> {
-  if (USE_MOCK) {
-    await latency();
-    return salesFor(id, days);
-  }
-  const res = await http<Contract.MachineSales>(`/api/machines/${encodeURIComponent(id)}/sales?days=${days}`);
-  return res.days.map((d) => ({ date: d.day, units: d.units, revenue: d.revenue }));
+export function getSales(id: string, days = 60): Promise<SalesPoint[]> {
+  return withBackup(
+    "getSales",
+    async () => {
+      const res = await http<Contract.MachineSales>(`/api/machines/${encodeURIComponent(id)}/sales?days=${days}`);
+      return res.days.map((d) => ({ date: d.day, units: d.units, revenue: d.revenue }));
+    },
+    async () => {
+      await latency();
+      return salesFor(id, days);
+    },
+  );
 }
 
 /** Stock per slot. The contract serves it inside GET /api/machines/:id (`slots`). */
-export async function getStock(id: string): Promise<Slot[]> {
-  if (USE_MOCK) {
-    await latency();
-    return slotsFor(id);
-  }
-  const res = await http<Contract.MachineDetail>(`/api/machines/${encodeURIComponent(id)}`);
-  return res.slots.map((s) => ({
-    id: s.slotId,
-    machineId: id,
-    product: { id: s.productId, name: s.productName, cost: 0, price: 0, shelfLifeDays: 0 },
-    capacity: s.capacity,
-    quantity: s.quantity,
-    expiryDate: s.nextExpiry ?? "",
-  }));
+export function getStock(id: string): Promise<Slot[]> {
+  return withBackup(
+    "getStock",
+    async () => {
+      const res = await http<Contract.MachineDetail>(`/api/machines/${encodeURIComponent(id)}`);
+      return res.slots.map((s) => ({
+        id: s.slotId,
+        machineId: id,
+        product: { id: s.productId, name: s.productName, cost: 0, price: 0, shelfLifeDays: 0 },
+        capacity: s.capacity,
+        quantity: s.quantity,
+        expiryDate: s.nextExpiry ?? "",
+      }));
+    },
+    async () => {
+      await latency();
+      return slotsFor(id);
+    },
+  );
 }
 
 /** GET /api/machines/:id/forecast */
-export async function getForecast(id: string): Promise<ForecastPoint[]> {
-  if (USE_MOCK) {
-    await latency();
-    return forecastFor(id);
-  }
-  const res = await http<Contract.MachineForecast>(`/api/machines/${encodeURIComponent(id)}/forecast`);
-  return res.history.map((h) => ({ date: h.day, forecast: h.forecast, actual: h.actual }));
+export function getForecast(id: string): Promise<ForecastPoint[]> {
+  return withBackup(
+    "getForecast",
+    async () => {
+      const res = await http<Contract.MachineForecast>(`/api/machines/${encodeURIComponent(id)}/forecast`);
+      return res.history.map((h) => ({ date: h.day, forecast: h.forecast, actual: h.actual }));
+    },
+    async () => {
+      await latency();
+      return forecastFor(id);
+    },
+  );
 }
 
 // ─── Orders ──────────────────────────────────────────────────────────────────
 
 /** GET /api/orders */
-export async function getOrders(): Promise<PurchaseOrder[]> {
-  if (USE_MOCK) {
-    await latency();
-    return [...mockOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
-  }
-  const rows = await http<Contract.PurchaseOrder[]>("/api/orders");
-  return rows.map(fromOrder);
+export function getOrders(): Promise<PurchaseOrder[]> {
+  return withBackup(
+    "getOrders",
+    async () => (await http<Contract.PurchaseOrder[]>("/api/orders")).map(fromOrder),
+    async () => {
+      await latency();
+      return [...mockOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    },
+  );
 }
 
 /** POST /api/orders/:id/approve */
-export async function approveOrder(id: string): Promise<PurchaseOrder> {
-  if (USE_MOCK) {
-    await sleep(600);
-    const found = mockOrders.find((o) => o.id === id);
-    if (!found) throw new Error(`Order ${id} not found`);
-    const updated: PurchaseOrder = { ...found, status: "approved" };
-    mockOrders = mockOrders.map((o) => (o.id === id ? updated : o));
-    return updated;
-  }
-  return fromOrder(await http<Contract.PurchaseOrder>(`/api/orders/${encodeURIComponent(id)}/approve`, { method: "POST" }));
+export function approveOrder(id: string): Promise<PurchaseOrder> {
+  return withBackup(
+    "approveOrder",
+    async () =>
+      fromOrder(await http<Contract.PurchaseOrder>(`/api/orders/${encodeURIComponent(id)}/approve`, { method: "POST" })),
+    async () => {
+      await sleep(600);
+      const found = mockOrders.find((o) => o.id === id);
+      if (!found) throw new Error(`Order ${id} not found`);
+      const updated: PurchaseOrder = { ...found, status: "approved" };
+      mockOrders = mockOrders.map((o) => (o.id === id ? updated : o));
+      return updated;
+    },
+  );
 }
 
 // ─── Agent ───────────────────────────────────────────────────────────────────
@@ -276,10 +337,29 @@ export async function approveOrder(id: string): Promise<PurchaseOrder> {
 /**
  * POST /api/agent/run-night, then follow the run (GET /api/agent/runs/:id once a second)
  * and hand each new step to `onStep` as it arrives. Resolves with the finished run.
+ * Falls back to the scripted run only if nothing has streamed yet, so steps never repeat.
  */
-export async function runNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
-  if (USE_MOCK) return mockRunNight(onStep);
+export function runNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
+  let streamed = 0;
+  const counting = (s: AgentStep) => {
+    streamed++;
+    onStep(s);
+  };
+  return withBackup(
+    "runNight",
+    async () => {
+      try {
+        return await realRunNight(counting);
+      } catch (e) {
+        // A run that failed halfway shows its error instead of restarting from the script.
+        throw streamed > 0 ? new NoBackupError(e) : e;
+      }
+    },
+    () => mockRunNight(onStep),
+  );
+}
 
+async function realRunNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
   const { runId } = await http<Contract.RunNightResponse>("/api/agent/run-night", { method: "POST" });
   let seen = 0;
   let run: Contract.AgentRun;
@@ -335,20 +415,25 @@ async function mockRunNight(onStep: (s: AgentStep) => void): Promise<AgentRun> {
 // ─── Simulation ──────────────────────────────────────────────────────────────
 
 /** POST /api/sim/fast-forward?days=7 */
-export async function fastForward(days = 7): Promise<BenchmarkResult> {
-  if (USE_MOCK) {
-    await sleep(4000);
-    return benchmarkResult;
-  }
-  const res = await http<Contract.FastForwardResponse>(`/api/sim/fast-forward?days=${days}`, { method: "POST" });
-  const b = res.benchmark;
-  return {
-    days: res.daysSimulated,
-    // The contract reports lost revenue rather than revenue; screens hide revenue when it's 0.
-    agent: { stockOuts: b.agent.stockOuts, expiredProducts: b.agent.expiredUnits, revenue: 0 },
-    fixedOrder: { stockOuts: b.fixedWeeklyOrder.stockOuts, expiredProducts: b.fixedWeeklyOrder.expiredUnits, revenue: 0 },
-    daily: b.daily.map((d) => ({ date: d.day, agentStockOuts: d.agentStockOuts, fixedStockOuts: d.fixedStockOuts })),
-  };
+export function fastForward(days = 7): Promise<BenchmarkResult> {
+  return withBackup(
+    "fastForward",
+    async () => {
+      const res = await http<Contract.FastForwardResponse>(`/api/sim/fast-forward?days=${days}`, { method: "POST" });
+      const b = res.benchmark;
+      return {
+        days: res.daysSimulated,
+        // The contract reports lost revenue rather than revenue; screens hide revenue when it's 0.
+        agent: { stockOuts: b.agent.stockOuts, expiredProducts: b.agent.expiredUnits, revenue: 0 },
+        fixedOrder: { stockOuts: b.fixedWeeklyOrder.stockOuts, expiredProducts: b.fixedWeeklyOrder.expiredUnits, revenue: 0 },
+        daily: b.daily.map((d) => ({ date: d.day, agentStockOuts: d.agentStockOuts, fixedStockOuts: d.fixedStockOuts })),
+      };
+    },
+    async () => {
+      await sleep(4000);
+      return benchmarkResult;
+    },
+  );
 }
 
 // ─── Investor ────────────────────────────────────────────────────────────────
@@ -358,11 +443,14 @@ export async function fastForward(days = 7): Promise<BenchmarkResult> {
  * Not in api.md yet: the contract has GET /api/investors/:id/statement (by investor).
  * Todor needs to add this per-machine route, or this function maps the other one.
  */
-export async function getInvestorStatement(machineId: string, model: "A" | "B" | "C"): Promise<InvestorStatement> {
-  if (USE_MOCK) {
-    await latency();
-    if (!machineSeedById.has(machineId)) throw new Error(`Machine ${machineId} not found`);
-    return investorStatementFor(machineId, model);
-  }
-  return http<InvestorStatement>(`/api/investor/${encodeURIComponent(machineId)}?model=${model}`);
+export function getInvestorStatement(machineId: string, model: "A" | "B" | "C"): Promise<InvestorStatement> {
+  return withBackup(
+    "getInvestorStatement",
+    () => http<InvestorStatement>(`/api/investor/${encodeURIComponent(machineId)}?model=${model}`),
+    async () => {
+      await latency();
+      if (!machineSeedById.has(machineId)) throw new Error(`Machine ${machineId} not found`);
+      return investorStatementFor(machineId, model);
+    },
+  );
 }
