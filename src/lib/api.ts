@@ -624,14 +624,14 @@ export const screenSteps = (steps: Contract.AgentStep[]): AgentStep[] => steps.f
 
 // ─── Agent suggestions ───────────────────────────────────────────────────────
 // GET /api/suggestions, POST /api/suggestions/:id/accept|reject (proposed; see
-// api-types.ts). They come from Viktor's agent, so they follow AGENT_LIVE: until the
-// agent writes them to the database, both modes use the mocks.
+// api-types.ts). Live on Todor's API: the agent stores them with create_suggestion, so
+// they come from the real API whenever it's on, with the mocks as read-only backup.
 
 let mockSuggestionState: Suggestion[] = mockSuggestions.map((s) => ({ ...s }));
 
 /** The agent's suggestions, newest night first; `pending` only, or all. */
 export async function getNightSuggestions(status: "pending" | "all" = "all"): Promise<Suggestion[]> {
-  const list = AGENT_LIVE
+  const list = !USE_MOCK
     ? await withBackup(
         "getNightSuggestions",
         () => http<Suggestion[]>(`/api/suggestions${status === "pending" ? "?status=pending" : ""}`),
@@ -653,7 +653,7 @@ async function decideSuggestion(id: string, decision: "accept" | "reject"): Prom
     mockSuggestionState = mockSuggestionState.map((s) => (s.id === id ? updated : s));
     return updated;
   };
-  if (!AGENT_LIVE) return local();
+  if (USE_MOCK) return local();
   return write(() => http<Suggestion>(`/api/suggestions/${encodeURIComponent(id)}/${decision}`, { method: "POST" }), local);
 }
 

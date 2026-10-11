@@ -166,16 +166,22 @@ export function suggestionsFrom({
   const expiring = slots.find(
     (s) => isFresh(s) && s.quantity > 0 && hoursUntil(s.expiryDate) < 48,
   );
-  const fresh = expiring ?? slots.find(isFresh);
-  const best = slots[0];
+  // Only a slow seller is worth swapping: food that's about to expire, or a fresh slot
+  // that's still mostly full. A fresh slot that sold out is selling, not a candidate.
+  const slowFresh = slots.find((s) => isFresh(s) && s.capacity > 0 && s.quantity / s.capacity >= 0.6);
+  const fresh = expiring ?? slowFresh;
+  // The fastest seller: the packaged product with the least left (but not the slot itself).
+  const best = slots
+    .filter((s) => !isFresh(s) && s.capacity > 0)
+    .sort((a, b) => a.quantity / a.capacity - b.quantity / b.capacity)[0];
   if (fresh && best && fresh.product.id !== best.product.id) {
     const margin = best.product.price > 0 ? best.product.price - best.product.cost : AVG_MARGIN;
     add(fresh.id, {
       kind: "swap",
       title: `Swap ${fresh.product.name} (${fresh.id.split("-").pop()}) for another ${best.product.name} slot`,
       reason: expiring
-        ? `${expiring.quantity} are about to expire unsold. ${best.product.name} is this machine's best seller and lasts months.`
-        : `Fresh food here sells slowly and some expires; ${best.product.name} is the best seller and never goes off.`,
+        ? `${expiring.quantity} are about to expire unsold. ${best.product.name} sells out fastest here and lasts months.`
+        : `${fresh?.product.name} sells slowly here (still mostly full); ${best.product.name} sells out fastest and never goes off.`,
       impactPerMonth: round2(perSlot * 30 * margin * 0.8 + fresh.capacity * 0.3 * (fresh.product.cost || 1.5) * 4),
       confidence: expiring ? "high" : "medium",
     });
