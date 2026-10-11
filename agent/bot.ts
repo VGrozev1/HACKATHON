@@ -1,3 +1,7 @@
+// Long-polling: an alternative to the webhook at
+// src/app/api/telegram/webhook/route.ts, for local dev without a public
+// HTTPS URL. Only one of the two should be active — see agent/README.md's
+// "Telegram: webhook vs. polling" section.
 import { pathToFileURL } from "node:url";
 import { callTelegramApi } from "./telegram.ts";
 import { apiPost } from "./api.ts";
