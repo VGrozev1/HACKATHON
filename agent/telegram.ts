@@ -34,6 +34,10 @@ export async function sendTelegram(
   buttons?: TelegramButton[],
   chatId: string = process.env.TELEGRAM_STOCKER_CHAT_ID!,
 ): Promise<void> {
+  // The dashboard's run night sets this: the app then sends one route +
+  // checklist message and one suggestions message after the run instead of
+  // one message per tool call.
+  if (process.env.AGENT_TELEGRAM === "off") return;
   await callTelegramApi("sendMessage", {
     chat_id: chatId,
     text,

@@ -15,6 +15,8 @@ import type { NextRequest } from "next/server";
 import { approveOrder } from "@/lib/data/fleet";
 import { decideSuggestion } from "@/lib/data/suggestions";
 import { completeNextVisit } from "@/lib/data/visits";
+import { tickMachineInText } from "@/lib/data/night-notify";
+import { telegram, type InlineKeyboard } from "@/lib/integrations/telegram";
 
 const STOCKER_CHAT_ID = process.env.TELEGRAM_STOCKER_CHAT_ID;
 const APPROVER_CHAT_ID = process.env.TELEGRAM_APPROVER_CHAT_ID;
@@ -24,17 +26,36 @@ type TelegramUpdate = {
   callback_query?: {
     id: string;
     data?: string;
-    message?: { chat?: { id: number | string } };
+    message?: { message_id?: number; text?: string; chat?: { id: number | string }; reply_markup?: { inline_keyboard?: InlineKeyboard } };
   };
 };
 
 async function answerCallback(callbackQueryId: string, text?: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
-  }).catch((err) => console.error("Telegram answerCallbackQuery failed:", err));
+  await telegram("answerCallbackQuery", { callback_query_id: callbackQueryId, text }).catch((err) =>
+    console.error("Telegram answerCallbackQuery failed:", err),
+  );
+}
+
+/**
+ * After Done: tick the machine's items (✅) in the message and turn its Done
+ * button into a "Loaded" label, so the stocker sees what's finished.
+ */
+async function markDoneInMessage(cq: NonNullable<TelegramUpdate["callback_query"]>, machineId: string) {
+  const msg = cq.message;
+  const keyboard = msg?.reply_markup?.inline_keyboard ?? [];
+  const button = keyboard.flat().find((x) => x.callback_data === `done:${machineId}`);
+  const m = button?.text.match(/^Done: (\d+)\. (.+)$/);
+  if (!msg?.text || !m) return;
+  await telegram("editMessageText", {
+    chat_id: msg.chat?.id,
+    message_id: msg.message_id,
+    text: tickMachineInText(msg.text, m[1], m[2]),
+    reply_markup: {
+      inline_keyboard: keyboard.map((row) =>
+        row.map((x) => (x.callback_data === `done:${machineId}` ? { text: `✅ Loaded: ${m[1]}. ${m[2]}`, callback_data: "noop" } : x)),
+      ),
+    },
+  }).catch((err) => console.error("Telegram editMessageText failed:", err));
 }
 
 export async function POST(req: NextRequest) {
@@ -63,15 +84,19 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    if (action === "done" && chatId === STOCKER_CHAT_ID) {
+    if (action === "noop") {
+      // An already finished machine: nothing to do.
+      await answerCallback(cq.id);
+    } else if (action === "done" && chatId === STOCKER_CHAT_ID) {
       // id here is a machine id, not a visit id.
       const visit = await completeNextVisit(id);
-      await answerCallback(cq.id, visit ? `${id} marked done.` : `No planned visit for ${id}.`);
+      if (visit) await markDoneInMessage(cq, id);
+      await answerCallback(cq.id, visit ? `${id} marked done: stock updated.` : `No planned visit for ${id}.`);
     } else if (action === "approve" && chatId === APPROVER_CHAT_ID) {
       // Approving, emailing the supplier, and setting status SENT all
       // happen inside approveOrder.
       const order = await approveOrder(id, "telegram");
-      await answerCallback(cq.id, order ? "approved and emailed" : `Order ${id} not found.`);
+      await answerCallback(cq.id, order ? "Approved." : `Order ${id} not found.`);
     } else if (action === "sug_ok" && chatId === APPROVER_CHAT_ID) {
       // Accepting/rejecting only changes status — never prices, stock, or orders.
       const result = await decideSuggestion(id, "accepted");

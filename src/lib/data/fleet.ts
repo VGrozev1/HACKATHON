@@ -16,7 +16,6 @@ import type {
 import { addDays, dayRange, sofiaTime, type Day } from "@/lib/sim/calendar";
 import { Prisma } from "@/generated/prisma/client";
 import { cashMismatches } from "./cash";
-import { sendOrderEmail } from "./orders";
 import { getSimToday, simNight } from "./sim-clock";
 import { loadStock, machineSlotStock, stockPercentByMachine } from "./stock";
 import { sellable } from "@/lib/sim/stock";
@@ -242,7 +241,6 @@ export async function approveOrder(id: string, approvedBy = "dashboard"): Promis
   if (!order) return null;
   if (order.status === "AWAITING_APPROVAL") {
     await db.purchaseOrder.update({ where: { id }, data: { status: "APPROVED", approvedAt: new Date(), approvedBy } });
-    await sendOrderEmail(id); // B7: the supplier gets it once a human approves; status becomes SENT
   }
   return toOrderDto(await db.purchaseOrder.findUniqueOrThrow({ where: { id }, include: orderInclude }));
 }

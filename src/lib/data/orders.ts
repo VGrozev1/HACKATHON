@@ -1,8 +1,8 @@
 // Purchase orders placed by the agent (POST /api/orders) and the supplier email.
 // Every rule is checked here, on the server, against the real catalog: the
 // agent's own guardrails are a helpful first pass, this is the final word.
+// Approved orders are recorded, not emailed: the nightly email covers them.
 
-import { Resend } from "resend";
 import { db } from "@/lib/db";
 import { addDays, sofiaTime } from "@/lib/sim/calendar";
 import { nextReadableId, type Catalog } from "./agent-api";
@@ -109,7 +109,9 @@ export async function createAgentOrder(input: AgentOrderInput, catalog: Catalog)
     });
   }
 
-  const emailed = status === "approved" ? await sendOrderEmail(id) : false;
+  // Orders are not emailed one by one: after the night's run, one email lists
+  // everything missing from the machines (src/lib/data/night-notify.ts).
+  const emailed = false;
   return {
     id,
     supplier: supplier?.name ?? input.supplier,
@@ -122,37 +124,4 @@ export async function createAgentOrder(input: AgentOrderInput, catalog: Catalog)
     emailed,
     delivery_date: deliveryDate,
   };
-}
-
-/**
- * Email an approved order to its supplier (the same text as Viktor's
- * agent/email.ts) and mark it SENT. Returns false, leaving the order APPROVED,
- * when email isn't configured or Resend refuses.
- */
-export async function sendOrderEmail(orderId: string): Promise<boolean> {
-  const order = await db.purchaseOrder.findUnique({
-    where: { id: orderId },
-    include: { supplier: true, lines: { include: { product: true } } },
-  });
-  if (!order || order.status !== "APPROVED" || !process.env.RESEND_API_KEY) return false;
-
-  const text = [
-    `New purchase order for ${order.supplier.name}.`,
-    "",
-    ...order.lines.map((l) => `- ${l.product.name}: ${l.quantity}`),
-    "",
-    `Order total: €${order.total.toFixed(2)}`,
-  ].join("\n");
-  const { data, error } = await new Resend(process.env.RESEND_API_KEY).emails.send({
-    from: process.env.RESEND_FROM ?? "Vending AI <onboarding@resend.dev>",
-    to: order.supplier.email,
-    subject: `Purchase order ${order.id} for ${order.supplier.name}`,
-    text,
-  });
-  if (error) {
-    console.error(`[orders] email for ${order.id} failed:`, error.message ?? error);
-    return false;
-  }
-  await db.purchaseOrder.update({ where: { id: order.id }, data: { status: "SENT", emailId: data?.id ?? null } });
-  return true;
 }

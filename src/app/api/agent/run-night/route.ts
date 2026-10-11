@@ -6,6 +6,7 @@
 import { after, type NextRequest } from "next/server";
 import type { RunNightResponse } from "@/lib/api-types";
 import { createRun, failRun, finishRun, stepRecorder, type ToolStep } from "@/lib/data/agent-runs";
+import { notifyNight } from "@/lib/data/night-notify";
 import { getSimToday } from "@/lib/data/sim-clock";
 
 // A night is up to 25 Claude calls; Vercel stops the function at this limit.
@@ -19,6 +20,9 @@ export async function POST(req: NextRequest) {
   // APP_URL on every call): point them at the address this request came in on,
   // so it works on localhost and on the deployed site alike.
   process.env.APP_URL = req.nextUrl.origin;
+  // The agent's own Telegram messages stay off; after the run the app sends
+  // the route, what each machine needs, and one order email (night-notify.ts).
+  process.env.AGENT_TELEGRAM = "off";
 
   after(async () => {
     const steps = stepRecorder(runId);
@@ -28,7 +32,8 @@ export async function POST(req: NextRequest) {
       const { runNight } = await import("../../../../../agent/agent.ts");
       const result = await runNight(runDate, (step: ToolStep) => steps.record(step));
       await steps.flush();
-      await finishRun(runId, result);
+      const sent = await notifyNight(runDate);
+      await finishRun(runId, { ...result, summary: [result.summary, sent.length ? `Sent: ${sent.join("; ")}.` : ""].filter(Boolean).join("\n\n") });
     } catch (err) {
       await steps.flush();
       console.error(`[run-night] ${runId} failed:`, err);
