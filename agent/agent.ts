@@ -78,6 +78,7 @@ export async function runNight(
 
   let summary = "";
   let step = 0;
+  let continuations = 0;
 
   // Rebuilt and written to disk after every tool call (status RUNNING), so a
   // caller polling the run file from outside this process (e.g. the
@@ -102,15 +103,23 @@ export async function runNight(
         break;
       }
 
-      const response = await client.messages.create({
-        model: "claude-sonnet-5",
-        // Room for one reply that asks for stock + forecast on all 20 machines
-        // at once; at 4096 such a reply was cut off and the night ended early.
-        max_tokens: 16000,
-        system: systemPrompt,
-        tools,
-        messages,
-      });
+      // Streamed (the SDK requires it for replies this large), then read as one
+      // complete message: the rest of the loop is unchanged.
+      const response = await client.messages
+        .stream({
+          model: "claude-sonnet-5",
+          // Room for one reply that asks for stock + forecast on all 20 machines
+          // at once, plus its thinking.
+          max_tokens: 32000,
+          // Thinking is on by default at effort "high"; at that level planning
+          // 20 machines used the whole reply on thinking and never called a
+          // tool. "medium" thinks enough for a route and orders.
+          output_config: { effort: "medium" },
+          system: systemPrompt,
+          tools,
+          messages,
+        })
+        .finalMessage();
 
       messages.push({ role: "assistant", content: response.content });
 
@@ -118,6 +127,17 @@ export async function runNight(
       // max_tokens: ending there left the night with no plan and no summary.
       const asksForTools = response.content.some((block) => block.type === "tool_use");
       if (!asksForTools) {
+        // Ran out of room while still thinking: ask it to act, instead of
+        // ending the night with no route, orders or summary (at most twice).
+        if (response.stop_reason === "max_tokens" && continuations < 2) {
+          continuations++;
+          messages.push({
+            role: "user",
+            content:
+              "You ran out of room while thinking. Continue the routine now: call the next tools directly and keep your reasoning short.",
+          });
+          continue;
+        }
         const textParts: string[] = [];
         for (const block of response.content) {
           if (block.type === "text") {
