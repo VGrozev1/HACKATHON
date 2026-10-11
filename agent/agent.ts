@@ -15,7 +15,19 @@ import {
 import { getYesterdaysMisses, formatMisses } from "./misses.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const systemPrompt = readFileSync(path.join(here, "prompt.md"), "utf-8");
+
+// Next to this file when run with `node agent.ts`; when the Next.js app bundles
+// the agent (run night on Vercel), this file's own location is a build folder,
+// so fall back to <project>/agent/prompt.md (shipped via next.config.ts).
+// (Fixed paths, not computed ones: the bundler can then ship just this file.)
+function loadPrompt(): string {
+  try {
+    return readFileSync(new URL("./prompt.md", import.meta.url), "utf-8");
+  } catch {
+    return readFileSync(path.join(process.cwd(), "agent/prompt.md"), "utf-8");
+  }
+}
+const systemPrompt = loadPrompt();
 
 export type ToolStep = {
   step: number;
@@ -162,13 +174,20 @@ export async function runNight(
   return run;
 }
 
-async function saveRun(run: RunResult): Promise<string> {
-  const runsDir = path.join(here, "runs");
-  await mkdir(runsDir, { recursive: true });
+// The run file is a convenience for command-line runs. Where the disk is
+// read-only (Vercel), the app stores each step in the database through
+// onStep instead, so a failed write must never stop the night's run.
+async function saveRun(run: RunResult): Promise<string | null> {
+  try {
+    const runsDir = path.join(here, "runs");
+    await mkdir(runsDir, { recursive: true });
 
-  const filePath = path.join(runsDir, `${runId ?? `${run.date}_${run.startedAt.replace(/[:.]/g, "-")}`}.json`);
-  await writeFile(filePath, JSON.stringify(run, null, 2));
-  return filePath;
+    const filePath = path.join(runsDir, `${runId ?? `${run.date}_${run.startedAt.replace(/[:.]/g, "-")}`}.json`);
+    await writeFile(filePath, JSON.stringify(run, null, 2));
+    return filePath;
+  } catch {
+    return null;
+  }
 }
 
 // When this file is run directly (not imported), do tonight's run.
