@@ -35,7 +35,7 @@ import { pastOrders, tonightsOrders } from "@/mocks/ui/orders";
 import { agentScript, agentSummary, tonightsRoute } from "@/mocks/ui/agent";
 import { benchmarkResult } from "@/mocks/ui/investor";
 import { mockSuggestions } from "@/mocks/ui/suggestions";
-import { profitWeeksFromSales, statementFromSales, suggestionsFrom } from "@/lib/insights";
+import { profitWeeksFromSales, statementFromSales, statementMonth, suggestionsFrom } from "@/lib/insights";
 
 // Real API by default; any failed call falls back to the mocks (see withBackup).
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
@@ -595,7 +595,12 @@ export function getSimToday(): Promise<string> {
 
 /** One machine's statement for last month, under payout model A, B or C. */
 export async function getInvestorStatement(machineId: string, model: "A" | "B" | "C", value?: number): Promise<InvestorStatement> {
-  return statementFromSales(machineId, await getSales(machineId, 60), model, undefined, value);
+  // "Last month" comes from the backend's simulated today, fetched here rather than the
+  // shared clock (which may not have loaded yet), and 62 days of sales always cover all
+  // of the previous month, even on the 31st.
+  const [today, sales] = await Promise.all([getSimToday(), getSales(machineId, 62)]);
+  const month = statementMonth(new Date(`${today}T12:00:00Z`));
+  return statementFromSales(machineId, sales, model, month, value);
 }
 
 /** Weekly sales, costs and profit for one machine, last 8 weeks. */
