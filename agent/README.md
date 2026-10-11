@@ -106,12 +106,64 @@ locally, it just relays what the API says:
 - **Visits** (`POST /api/visits`): a load list can't exceed the machine's
   slot capacity for that product; re-planning the same day replaces the
   existing plan.
-- **Telegram button taps** (`bot.ts`): only accepted from the two known chat
-  IDs; a repeated tap on the same button is a no-op; every tap gets answered
-  so the button stops spinning. Each tap is one direct call to the real API
-  (`visit-done`, `orders/:id/approve`, `suggestions/:id/accept|reject`) —
-  accepting/rejecting a suggestion only flips its stored status, it never
-  touches prices, stock, or orders.
+- **Telegram button taps**: only accepted from the two known chat IDs;
+  every tap gets answered so the button stops spinning. Each tap is one
+  direct call to the real API (`visit-done`, `orders/:id/approve`,
+  `suggestions/:id/accept|reject`) — accepting/rejecting a suggestion only
+  flips its stored status, it never touches prices, stock, or orders. A
+  repeated tap is safe either way: each of those calls is already
+  idempotent server-side (a second "Done" finds no planned visit left to
+  complete, a second "Approve" just returns the already-approved order,
+  a second Accept/Reject gets a 409).
+
+## Telegram: webhook vs. polling (pick one, never both)
+
+Telegram delivers button taps to a bot **one way at a time** — webhook or
+long-polling, never both. There are two ways to receive them, and only one
+should be active:
+
+- **Webhook** (`src/app/api/telegram/webhook/route.ts`) — Telegram POSTs
+  each tap straight to the running app, which handles it inline (no
+  separate process). Needs a public HTTPS URL, so this is for the deployed
+  app (Vercel), not plain `next dev` on localhost.
+- **Polling** (`agent/bot.ts`) — this agent calls `getUpdates` in a loop,
+  left running in its own terminal. Works anywhere, including localhost,
+  since Telegram never has to reach it — this agent reaches out instead.
+
+**To switch to the webhook** (once the app is deployed somewhere with a
+public HTTPS URL):
+
+```bash
+# Stop bot.ts first if it's running — see below for why.
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=$APP_URL/api/telegram/webhook&secret_token=$TELEGRAM_WEBHOOK_SECRET"
+```
+
+`TELEGRAM_WEBHOOK_SECRET` is already in `.env.example` (any random string —
+it's checked against Telegram's `x-telegram-bot-api-secret-token` header so
+only real Telegram requests get processed); set it in the deployment's env
+vars, matching what you pass to `setWebhook` above. `APP_URL` must be the
+real public URL, not `http://localhost:3000`.
+
+Once registered, **stop running `bot.ts`** — its `getUpdates` calls will
+start failing (Telegram returns a 409 "can't use getUpdates while webhook
+is active" error) the moment the webhook is set, which is expected, not a
+bug, but it'll spam retries in its terminal forever if left running.
+
+**To switch back to polling** (e.g. for local dev without a public URL):
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook"
+```
+
+Then `node --env-file=.env bot.ts` works again. Check which mode is
+currently active any time with:
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+```
+
+(an empty `"url"` in the response means polling mode; a non-empty one
+means the webhook is registered and `bot.ts` won't receive anything).
 
 ## Known gaps
 
