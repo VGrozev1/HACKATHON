@@ -137,7 +137,10 @@ export function MachineDetail({ params }: { params: Promise<{ id: string }> }) {
           )}
         </Panel>
 
-        <Panel title="Forecast vs actual" description="Last 14 days and the next 7. Dashed: forecast. Solid: actual.">
+        <Panel
+          title="Forecast vs actual"
+          description={`${forecast.data?.some((p) => p.actual === null) ? "Last 14 days and the days ahead" : "Last 14 days"}. Dashed: forecast. Solid: actual.`}
+        >
           {forecast.error ? (
             <ErrorState error={forecast.error} onRetry={forecast.retry} />
           ) : !forecast.data ? (

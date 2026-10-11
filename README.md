@@ -40,6 +40,7 @@ Branches are `<name>/<topic>`. Merge into `main` through pull requests. Pull `ma
 | `npm run db:migrate -- --name <change>` | Apply schema changes to the dev database and create a migration (commit it) |
 | `npm run db:seed` | Seed the demo fleet (A2) |
 | `npm run db:studio` | Browse the database in the browser |
+| `npm run db:sync-catalog` | Copy product and supplier edits from `src/lib/sim/fleet.ts` into the database without wiping data (`-- --dry-run` to preview) |
 | `npm run sim:report` | 60-day simulation summary, no database |
 | `npm run sim:forecast-check` | Forecast vs the simulator's true demand |
 | `npm run sim:benchmark -- 7` | Agent vs fixed weekly order over N days, in memory (changes nothing) |
