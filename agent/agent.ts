@@ -104,7 +104,9 @@ export async function runNight(
 
       const response = await client.messages.create({
         model: "claude-sonnet-5",
-        max_tokens: 4096,
+        // Room for one reply that asks for stock + forecast on all 20 machines
+        // at once; at 4096 such a reply was cut off and the night ended early.
+        max_tokens: 16000,
         system: systemPrompt,
         tools,
         messages,
@@ -112,7 +114,10 @@ export async function runNight(
 
       messages.push({ role: "assistant", content: response.content });
 
-      if (response.stop_reason !== "tool_use") {
+      // Keep going while the reply asks for tools, even if it was cut off by
+      // max_tokens: ending there left the night with no plan and no summary.
+      const asksForTools = response.content.some((block) => block.type === "tool_use");
+      if (!asksForTools) {
         const textParts: string[] = [];
         for (const block of response.content) {
           if (block.type === "text") {
